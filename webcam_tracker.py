@@ -210,7 +210,7 @@ def run(args):
     last_report = 0.0
     preview_opened = False
     details = False
-    fullscreen = True
+    fullscreen = False
     status = "WAITING FOR CAMERA"
     started = time.monotonic()
     print("ShadowPad. Camera frames stay in memory. " +
@@ -225,7 +225,7 @@ def run(args):
         started = time.monotonic()
         if not args.headless:
             cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
-            cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            cv2.resizeWindow(WINDOW, 1000, 750)
         while not args.seconds or time.monotonic() - started < args.seconds:
             now = time.monotonic()
             if camera.error:
@@ -280,8 +280,8 @@ def run(args):
                 canvas = preview(display_frame, landmarks, visible, status, age,
                                  processing_ms, capture_fps, count / elapsed, details, args.confidence)
                 if controller:
-                    canvas[-28:] = (24, 24, 24)
-                    put(canvas, controller.status, (12, canvas.shape[0] - 10), scale=.4)
+                    canvas[-46:] = (24, 24, 24)
+                    put(canvas, controller.status, (12, canvas.shape[0] - 17), scale=.58)
                 cv2.imshow(WINDOW, canvas)
                 if not preview_opened:
                     print("Preview open. Q/Esc quits. C calibrates when movement control is enabled.", flush=True)
@@ -293,6 +293,8 @@ def run(args):
                     details = not details
                 if key in (ord("c"), ord("C")) and controller:
                     controller.calibrate()
+                if key in (ord("a"), ord("A")) and controller:
+                    controller.arm_countdown(time.monotonic())
                 if key in (ord("f"), ord("F")):
                     fullscreen = not fullscreen
                     cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN,

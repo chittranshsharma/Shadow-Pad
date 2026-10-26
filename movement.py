@@ -8,6 +8,9 @@ from statistics import median
 from tracking_quality import assess
 
 
+POSE_TIMEOUT = .6
+
+
 @dataclass(frozen=True)
 class Neutral:
     x: float
@@ -44,7 +47,7 @@ class Movement:
 
     def update(self, points, age, now, confidence=.6):
         _, visible = assess(points, age, confidence)
-        if not {11, 12} <= visible or age > .25:
+        if not {11, 12} <= visible or age > POSE_TIMEOUT:
             self.reset_actions()
             if self.calibrating:
                 self.samples.clear()
@@ -116,10 +119,13 @@ class MovementController:
         self.desired = set()
         self.held = set()
         self.toggle_was_down = False
-        self.status = "C: calibrate | Ctrl+Alt+P: arm/pause"
+        self.arm_at = None
+        self.status = "C: calibrate | A: arm in 5 seconds"
 
     def pause(self, reason="Paused"):
         self.armed = False
+        self.arm_at = None
+        self.target = None
         self.desired.clear()
         self.movement.reset_actions()
         self.status = reason
@@ -129,6 +135,26 @@ class MovementController:
     def calibrate(self):
         self.pause("Calibrating: sit comfortably and hold still for 2 seconds")
         self.movement.calibrate()
+
+    def arm_countdown(self, now, seconds=5):
+        if self.movement.neutral is None:
+            self.status = "Calibrate first: press C in this preview"
+            return
+        self.pause(f"ARMING: click PPSSPP within {seconds:g} seconds")
+        self.arm_at = now + seconds
+
+    def _arm(self, now):
+        target = self.keyboard.foreground_ppsspp()
+        if not target:
+            self.status = "NOT ARMED: PPSSPP was not the active window; press A and retry"
+            return
+        if self.last_pose is None or now - self.last_pose > POSE_TIMEOUT:
+            self.status = "NOT ARMED: shoulders missing or tracking too slow; press A and retry"
+            return
+        self.armed = True
+        self.target = target
+        self.status = "ACTIVE: neutral"
+        self.movement.reset_actions()
 
     def on_pose(self, points, age, now, confidence=.6):
         desired, valid = self.movement.update(points, age, now, confidence)
@@ -141,11 +167,18 @@ class MovementController:
         self.last_pose = now - age
         if self.movement.calibrating:
             self.status = "Calibrating: sit comfortably and hold still for 2 seconds"
-        elif self.movement.neutral is not None and not self.armed:
-            self.status = "Calibrated | click PPSSPP, then Ctrl+Alt+P to arm"
+        elif self.movement.neutral is not None and not self.armed and self.arm_at is None:
+            if self.status.startswith("Calibrating:"):
+                self.status = "Calibrated | press A here, then click PPSSPP"
         self.desired = desired if self.armed else set()
 
     def tick(self, now):
+        if self.arm_at is not None:
+            if now >= self.arm_at:
+                self.arm_at = None
+                self._arm(now)
+            else:
+                self.status = f"ARMING: click PPSSPP | {self.arm_at - now:.1f}s"
         toggle = self.keyboard.pause_requested()
         if toggle and not self.toggle_was_down:
             if self.armed:
@@ -153,21 +186,15 @@ class MovementController:
             elif self.movement.neutral is None:
                 self.status = "Calibrate first: focus the camera preview and press C"
             else:
-                target = self.keyboard.foreground_ppsspp()
-                if target and self.last_pose is not None and now - self.last_pose <= .25:
-                    self.armed = True
-                    self.target = target
-                    self.status = "Armed: release the hotkeys, then move naturally"
-                    self.movement.reset_actions()
-                else:
-                    self.status = "Not armed: focus PPSSPP and show both shoulders"
+                self.arm_at = None
+                self._arm(now)
         self.toggle_was_down = toggle
         if not self.armed:
             return
         if self.keyboard.foreground_ppsspp() != self.target:
             self.pause("PPSSPP lost focus: paused")
             return
-        if self.last_pose is None or now - self.last_pose > .25:
+        if self.last_pose is None or now - self.last_pose > POSE_TIMEOUT:
             self.pause("Tracking stale: paused")
             return
         desired = set() if self.keyboard.modifiers_down() else set(self.desired)

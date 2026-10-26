@@ -61,7 +61,7 @@ class MovementTests(unittest.TestCase):
     def test_stale_or_missing_shoulders_release_everything(self):
         movement = self.engine()
         movement.update(shoulders(x=.6, y=.52), .01, 3)
-        self.assertEqual(movement.update(shoulders(), .3, 3.1), (set(), False))
+        self.assertEqual(movement.update(shoulders(), .7, 3.1), (set(), False))
         self.assertEqual(movement.update(None, .01, 3.2), (set(), False))
 
     def test_higher_sensitivity_needs_less_motion(self):
@@ -131,7 +131,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_stale_tracking_disarms(self):
         self.arm()
-        self.controller.tick(3.5)
+        self.controller.tick(3.8)
         self.assertFalse(self.controller.armed)
         self.assertEqual(self.keyboard.keys, set())
 
@@ -146,6 +146,28 @@ class ControllerTests(unittest.TestCase):
         self.controller.tick(3.03)
         self.controller.tick(3.04)
         self.assertFalse(self.controller.armed)
+
+    def test_countdown_arms_after_game_receives_focus(self):
+        self.keyboard.focus = None
+        self.controller.arm_countdown(3, seconds=5)
+        self.controller.tick(7)
+        self.assertFalse(self.controller.armed)
+        self.keyboard.focus = (123, 1)
+        self.controller.on_pose(shoulders(), .01, 7.9)
+        self.controller.tick(8)
+        self.assertTrue(self.controller.armed)
+        self.controller.on_pose(shoulders(x=.6), .01, 8.01)
+        self.controller.tick(8.02)
+        self.assertEqual(self.keyboard.keys, {37})
+
+    def test_failed_arm_reason_survives_new_pose(self):
+        self.keyboard.focus = None
+        self.controller.arm_countdown(3, seconds=1)
+        self.controller.on_pose(shoulders(), .01, 3.5)
+        self.controller.tick(4)
+        self.assertIn("PPSSPP was not the active window", self.controller.status)
+        self.controller.on_pose(shoulders(), .01, 4.1)
+        self.assertIn("PPSSPP was not the active window", self.controller.status)
 
 
 if __name__ == "__main__":

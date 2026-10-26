@@ -16,7 +16,7 @@ ShadowPad explores playing a fighting game through body movement and arm gesture
 ## What works today
 
 - **Upper-body tracking:** shoulders, elbows, and wrists; legs and hips are not required.
-- **Full camera view:** mirrored fullscreen preview, no restrictive framing box, optional diagnostics with `Tab`.
+- **Full camera view:** mirrored windowed preview, no restrictive framing box, optional fullscreen with `F` and diagnostics with `Tab`.
 - **Local AI inference:** MediaPipe Pose Landmarker Full, with Lite available for comparison.
 - **Freshness-first processing:** one latest capture slot and at most one application-managed inference request in flight.
 - **Honest tracking states:** hidden, out-of-frame, low-confidence, and stale observations stay distinguishable.
@@ -141,9 +141,9 @@ Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm
 
 1. Open Tekken Practice mode and double-click **Play ShadowPad.cmd**.
 2. In the camera preview, press **C**, sit naturally, and hold still for about **two seconds**. Wait for **Calibrated**.
-3. Click the PPSSPP game window. Press **Ctrl+Alt+P**, then release the hotkeys to arm.
+3. Press **A** in the camera preview, then click the PPSSPP game window during the five-second countdown. The preview will show **ACTIVE** when armed. Keep PPSSPP focused while playing.
 4. Move using the mapping below. Returning toward neutral releases held directions.
-5. Press **Ctrl+Alt+P** again to pause. Losing PPSSPP focus or reliable shoulder tracking also pauses and releases keys; re-arm when ready.
+5. Press **Ctrl+Alt+P** to pause (or to arm directly while PPSSPP is focused). Losing PPSSPP focus or reliable shoulder tracking also pauses and releases keys; use **A** in the preview to re-arm.
 
 | Physical movement | Game input |
 |---|---|
