@@ -12,8 +12,8 @@ Build an on-device Windows webcam controller for PPSSPP with upper-body movement
 - PPSSPP binding inspection and explicitly armed one-shot input tests. The user confirmed the test launcher works in PPSSPP.
 - Shoulder-based neutral calibration and mirrored left/right movement with hysteresis.
 - Upper-body rise for a one-shot Up hold; dip for a sustained Down hold. Movement does not require reliable elbows.
-- Four wrist-and-shoulder attack gestures: left/right forward or inward strikes for Square/Triangle and left/right downward strikes for Cross/Circle, with one pulse per strike and return-to-guard rearming. Elbows are optional.
-- Paused startup, explicit arming, modifier suppression, focus checks, tracking-loss pause, and multi-key release handling.
+- Four wrist-and-shoulder attack gestures: left/right forward-and-inward strikes for Square/Triangle and left/right downward strikes for Cross/Circle. Temporal confirmation and return-to-guard rearming reduce one-frame false positives; elbows are optional.
+- Paused startup, explicit arming, modifier suppression, focus checks, immediate release on tracking gaps with automatic two-result recovery, and multi-key release handling.
 - Bounded callback-based timing statistics, warmup exclusion, P50/P95/P99, throughput/quality counters, environment/model identifiers, and JSON export.
 - Headless path avoids display-only mirroring/copies. No speedup percentage is claimed without equivalent benchmark runs.
 - Public README, architecture documentation, repeatable benchmark protocol, and Windows CI workflow.
@@ -24,7 +24,7 @@ Build an on-device Windows webcam controller for PPSSPP with upper-body movement
 - Dependency consistency and Python compilation are checked locally; GitHub CI runs separately after publication.
 - Actual Full-model callback/report integration has been checked using synthetic in-memory frames, with no physical webcam opened. This verifies plumbing, not real-world accuracy or latency.
 - Prior physical webcam runs established capture/model operation and occasional six-joint detection. Sustained elbow tracking was not established. Those differing development conditions are not a controlled Full-model benchmark.
-- Live individual PPSSPP test inputs and integrated left/right/jump movement are user-confirmed. Duck did not trigger reliably in the first live run, so its shoulder threshold was lowered and visible head lowering was added. Duck and four attacks still need live game acceptance.
+- Live individual PPSSPP test inputs and integrated left/right/jump movement are user-confirmed. The user reported unstable/missed attacks and unnecessary tracking pauses. A short headless physical-camera diagnostic found both shoulders in every result, but wrists and elbows below frame in every result; no gesture was performed during that diagnostic. Full processed about 10 results/s and Lite about 17 results/s under these conditions. This explains why arm gestures cannot be recognized when hands stay below the camera and does not establish attack accuracy. Duck and four attacks still need live game acceptance.
 
 ## Immediate acceptance steps
 
@@ -37,7 +37,7 @@ Build an on-device Windows webcam controller for PPSSPP with upper-body movement
 
 ## Next milestones
 
-- Refine duck and attack thresholds against actual gameplay and relaxed-posture feedback.
+- Refine duck and attack thresholds against labeled live gameplay and relaxed-posture feedback. Verify wrists remain in view during actual punches and kick-button gestures.
 - Evaluate labeled gesture precision/recall and false activations per minute.
 - Measure motion-to-visible-game latency separately from software timing.
 

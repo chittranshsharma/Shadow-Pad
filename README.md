@@ -22,7 +22,7 @@ ShadowPad explores playing a fighting game through body movement and arm gesture
 - **Honest tracking states:** hidden, out-of-frame, low-confidence, and stale observations stay distinguishable.
 - **Native input tester:** reads PPSSPP keyboard bindings, explicitly arms one bounded action, and checks foreground focus.
 - **Calibrated movement:** mirrored left/right lean, upper-body rise to jump, and dip to duck; shoulder-width normalization and hysteresis reduce dependence on distance and jitter.
-- **Four attack gestures:** left/right fist thrusts forward or inward for Square/Triangle, left/right hand drives downward for Cross/Circle. Each triggers one short press and needs a return to guard before it can fire again.
+- **Four attack gestures:** left/right fist thrusts diagonally forward and inward for Square/Triangle, left/right hand drives downward for Cross/Circle. Strikes are confirmed across consecutive results and require a return to guard before repeating.
 - **Performance instrumentation:** timing percentiles, warmup exclusion, bounded sample retention, throughput, and aggregate JSON reports.
 - **Automated verification:** camera-independent tests and a Windows GitHub Actions workflow.
 
@@ -144,7 +144,7 @@ Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm
 2. In the camera preview, press **C**, sit naturally, and hold still for about **two seconds**. Wait for **Calibrated**.
 3. Press **A** in the camera preview, then click the PPSSPP game window during the five-second countdown. The preview will show **ACTIVE** when armed. Keep PPSSPP focused while playing.
 4. Move using the mapping below. Returning toward neutral releases held directions.
-5. Press **Ctrl+Alt+P** to pause (or to arm directly while PPSSPP is focused). Losing PPSSPP focus or reliable shoulder tracking also pauses and releases keys; use **A** in the preview to re-arm.
+5. Press **Ctrl+Alt+P** to pause (or to arm directly while PPSSPP is focused). Losing PPSSPP focus pauses and releases keys. Brief shoulder-tracking gaps release keys and recover automatically; they do not require recalibration.
 
 | Physical movement | Game input |
 |---|---|
@@ -152,13 +152,13 @@ Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm
 | Lean toward the right side | Right held |
 | Raise your upper body above neutral | Up held for 0.30 seconds, then released |
 | Dip your shoulders below neutral | Down held while dipped |
-| Punch your left fist forward toward the camera, or inward, from chest-height guard | Square (left punch) |
-| Punch your right fist forward toward the camera, or inward, from chest-height guard | Triangle (right punch) |
+| Punch your left fist diagonally forward and inward from chest-height guard | Square (left punch) |
+| Punch your right fist diagonally forward and inward from chest-height guard | Triangle (right punch) |
 | Drive your left hand down from guard | Cross (left kick input) |
 | Drive your right hand down from guard | Circle (right kick input) |
 | Return toward centre | Movement released; jump can re-arm |
 
-With an upper-body camera, the jump gesture is a rise/straighten motion; feet leaving the floor are not detected. Duck accepts either a shoulder dip or a clear head lowering when the head was visible during calibration. Up/Down are normal PSP directions, so Tekken's current mode, character state, and configured controls determine the resulting jump/crouch. Left/right can combine with a rise or dip. For attacks, start with both hands visible near chest height. The preview footer shows `hands 2/2` when both wrists have a usable guard. Punch forward toward the camera or inward, or drive the hand down for a kick button, then bring that hand back before repeating. Forward detection uses MediaPipe's estimated depth, which may vary by camera; an inward fist motion is the visible 2D alternative. The kick mappings are hand gestures for the PSP kick buttons; no leg tracking is involved. Elbows are not required. Keep the laptop camera stationary after calibration. Press **C** in the preview to recalibrate after changing position.
+With an upper-body camera, the jump gesture is a rise/straighten motion; feet leaving the floor are not detected. Duck accepts either a shoulder dip or a clear head lowering when the head was visible during calibration. Up/Down are normal PSP directions, so Tekken's current mode, character state, and configured controls determine the resulting jump/crouch. Left/right can combine with a rise or dip. For attacks, start with both hands visible near chest height and apart from the centre. The preview footer shows `hands 2/2` when both wrists have a usable guard; `hands 0/2` means neither hand has an established guard yet. Move diagonally forward/inward for a punch or drive the hand down for a kick button. Hold the end position briefly, then return to guard before repeating. A straight punch toward a single camera without visible sideways change is hard to distinguish from noisy estimated depth, so the inward component matters. The kick mappings are hand gestures for the PSP kick buttons; no leg tracking is involved. Elbows are not required. Keep the laptop camera stationary after calibration. Press **C** in the preview only after changing the camera or seated position.
 
 For smaller movements, increase sensitivity (allowed range 0.5–2):
 
@@ -166,7 +166,7 @@ For smaller movements, increase sensitivity (allowed range 0.5–2):
 .\.venv\Scripts\python.exe webcam_tracker.py --control --sensitivity 1.5
 ```
 
-The current activation offsets are 0.20 neutral shoulder-width units for horizontal movement, 0.28 upward for jump, and 0.17 downward for duck or 0.25 for head lowering, divided by sensitivity. Lower release thresholds provide hysteresis. Jump fires once per rise and re-arms after returning near neutral. Wrist gestures need 0.26 shoulder widths inward or 0.28 estimated depth units forward for a punch, or 0.30 shoulder widths downward for a kick input. Elbows and wrists are not prerequisites for movement; confident wrists are needed only for attacks.
+The current activation offsets are 0.20 neutral shoulder-width units for horizontal movement, 0.28 upward for jump, and 0.17 downward for duck or 0.25 for head lowering, divided by sensitivity. Lower release thresholds provide hysteresis. Jump fires once per rise and re-arms after returning near neutral. Attacks require a stable two-result guard and two matching strike results: 0.25 shoulder widths inward, or 0.45 estimated depth units forward with at least 0.08 inward, for a punch; 0.30 shoulder widths downward for a kick input. Elbows and wrists are not prerequisites for movement; confident wrists are needed only for attacks.
 
 ## Measure performance
 
@@ -244,6 +244,8 @@ docs/                      Architecture and benchmarking methodology
 
 - **Camera unavailable:** close other camera apps; try `--camera 1` or `--backend msmf`. Check Windows camera permission yourself if required.
 - **Elbows unreliable:** bring more of the torso into the image and avoid table/body occlusion. The Full model is available, but its elbow improvement in the development setup is not established.
+- **Attacks do not fire:** check the footer for `hands 2/2`. If it says `hands 0/2`, show both wrists at chest height and hold still briefly. Press `Tab` to inspect wrist status; if they are below frame, angle the camera down slightly. Establish guard for two pose results, make the strike and hold the end position for about a quarter second, then return to guard.
+- **A brief tracking gap:** held inputs release immediately and resume after two good shoulder results. Keep PPSSPP focused; changing focus still pauses the controller.
 - **Input cancelled:** PPSSPP must be foreground at key-down and throughout the short hold.
 - **Input rejected:** check equal app privilege levels and the actual configured keyboard bindings.
 - **Unexpected OpenCV errors:** install only `opencv-contrib-python` in the environment; do not also install `opencv-python` or a headless build.
