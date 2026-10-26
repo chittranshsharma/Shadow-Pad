@@ -1,0 +1,4 @@
+mediapipe==1.1.1
+numpy==2.5.4
+# MediaPipe uses this OpenCV distribution; do not also install opencv-python.
+opencv-contrib-python==5.0.0.93
