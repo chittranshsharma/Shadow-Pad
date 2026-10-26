@@ -11,7 +11,7 @@
 
 ShadowPad explores playing a fighting game through body movement and arm gestures using a laptop webcam. Its foundation is a local processing engine: continuous capture, asynchronous pose estimation, confidence-aware tracking, native Windows input, and reproducible performance reports.
 
-**Current release:** upper-body movement control for **left, right, jump, and duck**, a camera preview, and a separate button tester. The button tester has been confirmed working by the developer/user. Integrated movement gestures still need a live Tekken acceptance run. Punch/attack gesture recognition is planned; attack buttons can currently be tested individually.
+**Current release:** upper-body movement and four wrist-based attack gestures, a camera preview, and a separate button tester. The button tester and left/right/jump gestures have been confirmed working by the user. Duck and attack gestures need a live Tekken acceptance run.
 
 ## What works today
 
@@ -22,6 +22,7 @@ ShadowPad explores playing a fighting game through body movement and arm gesture
 - **Honest tracking states:** hidden, out-of-frame, low-confidence, and stale observations stay distinguishable.
 - **Native input tester:** reads PPSSPP keyboard bindings, explicitly arms one bounded action, and checks foreground focus.
 - **Calibrated movement:** mirrored left/right lean, upper-body rise to jump, and dip to duck; shoulder-width normalization and hysteresis reduce dependence on distance and jitter.
+- **Four attack gestures:** left/right fist thrusts forward or inward for Square/Triangle, left/right hand drives downward for Cross/Circle. Each triggers one short press and needs a return to guard before it can fire again.
 - **Performance instrumentation:** timing percentiles, warmup exclusion, bounded sample retention, throughput, and aggregate JSON reports.
 - **Automated verification:** camera-independent tests and a Windows GitHub Actions workflow.
 
@@ -150,10 +151,14 @@ Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm
 | Lean toward the left side of the mirrored camera view | Left held |
 | Lean toward the right side | Right held |
 | Raise your upper body above neutral | Up held for 0.30 seconds, then released |
-| Dip your upper body below neutral | Down held while dipped |
+| Dip your shoulders below neutral | Down held while dipped |
+| Punch your left fist forward toward the camera, or inward, from chest-height guard | Square (left punch) |
+| Punch your right fist forward toward the camera, or inward, from chest-height guard | Triangle (right punch) |
+| Drive your left hand down from guard | Cross (left kick input) |
+| Drive your right hand down from guard | Circle (right kick input) |
 | Return toward centre | Movement released; jump can re-arm |
 
-With an upper-body camera, the jump gesture is a rise/straighten motion; feet leaving the floor are not detected. Up/Down are normal PSP directions, so Tekken's current mode, character state, and configured controls determine the resulting jump/crouch. Left/right can combine with a rise or dip. Keep the laptop camera stationary after calibration. Press **C** in the preview to recalibrate after changing position.
+With an upper-body camera, the jump gesture is a rise/straighten motion; feet leaving the floor are not detected. Duck accepts either a shoulder dip or a clear head lowering when the head was visible during calibration. Up/Down are normal PSP directions, so Tekken's current mode, character state, and configured controls determine the resulting jump/crouch. Left/right can combine with a rise or dip. For attacks, start with both hands visible near chest height. The preview footer shows `hands 2/2` when both wrists have a usable guard. Punch forward toward the camera or inward, or drive the hand down for a kick button, then bring that hand back before repeating. Forward detection uses MediaPipe's estimated depth, which may vary by camera; an inward fist motion is the visible 2D alternative. The kick mappings are hand gestures for the PSP kick buttons; no leg tracking is involved. Elbows are not required. Keep the laptop camera stationary after calibration. Press **C** in the preview to recalibrate after changing position.
 
 For smaller movements, increase sensitivity (allowed range 0.5–2):
 
@@ -161,7 +166,7 @@ For smaller movements, increase sensitivity (allowed range 0.5–2):
 .\.venv\Scripts\python.exe webcam_tracker.py --control --sensitivity 1.5
 ```
 
-The current activation offsets are 0.20 neutral shoulder-width units for horizontal movement, 0.28 upward for jump, and 0.25 downward for duck, divided by sensitivity. Lower release thresholds provide hysteresis. Jump fires once per rise and re-arms after returning near neutral. Elbows and wrists are not prerequisites for these movement inputs.
+The current activation offsets are 0.20 neutral shoulder-width units for horizontal movement, 0.28 upward for jump, and 0.17 downward for duck or 0.25 for head lowering, divided by sensitivity. Lower release thresholds provide hysteresis. Jump fires once per rise and re-arms after returning near neutral. Wrist gestures need 0.26 shoulder widths inward or 0.28 estimated depth units forward for a punch, or 0.30 shoulder widths downward for a kick input. Elbows and wrists are not prerequisites for movement; confident wrists are needed only for attacks.
 
 ## Measure performance
 
@@ -229,9 +234,10 @@ docs/                      Architecture and benchmarking methodology
 - [x] Confirm individual PPSSPP test inputs work (user acceptance)
 - [x] Calibrate neutral shoulders; add left/right movement with a dead zone and hysteresis
 - [x] Add upper-body rise/dip gestures for jump and duck
-- [ ] Validate integrated movement gestures in Tekken and tune sensitivity
-- [ ] Detect independent arm strikes with one activation per ready/strike/return cycle
-- [ ] Add attack gestures to movement control with tracking-loss release behavior
+- [x] Confirm left/right/jump in Tekken (user acceptance)
+- [x] Detect independent wrist strikes with one activation per ready/strike/return cycle
+- [x] Add attack gestures to movement control with tracking-loss release behavior
+- [ ] Validate duck and attack gestures in Tekken and tune sensitivity
 - [ ] Measure gesture precision/recall, false activations, and motion-to-game latency
 
 ## Troubleshooting and limits

@@ -36,7 +36,9 @@ Cleanup attempts key-up even after an uncertain input failure. Windows keyboard 
 
 ## Calibrated movement
 
-`movement.py` samples stable shoulder midpoints for two seconds and normalizes offsets by neutral shoulder width. Horizontal and duck controls use different engage/release thresholds. A rise produces one 300 ms Up hold; returning near neutral re-arms it. Left/right and vertical actions can combine. Missing elbows do not gate these shoulder-based controls.
+`movement.py` samples stable shoulder midpoints for two seconds and normalizes offsets by neutral shoulder width. It also samples a visible head to support seated ducking. Horizontal and duck controls use different engage/release thresholds. A rise produces one 300 ms Up hold; returning near neutral re-arms it. Left/right and vertical actions can combine. Missing elbows do not gate these shoulder-based controls.
+
+Two independent wrist state machines learn the starting hand position near chest height. An inward wrist excursion or a forward change in estimated wrist-versus-shoulder depth fires the same-side punch button; a downward excursion fires the same-side kick button. Each key is held for at most 140 ms and will not repeat until the hand returns near its starting position. Losing a wrist resets that hand's guard without stopping shoulder-based movement. The preview shows how many hands have a usable guard. Estimated pose depth varies by camera; inward 2D movement provides a fallback.
 
 The controller starts paused, calibrates with C in the preview, and starts a five-second arm countdown with A so the user can focus PPSSPP. Ctrl+Alt+P also arms directly while PPSSPP is foreground or pauses an active session. A hotkey rising-edge check prevents repeated toggles while held. Modifier keys suppress injection until released. Every new result updates the desired key set; a separate tick reconciles releases and presses and expires the Up pulse even between model callbacks. Foreground changes, invalid shoulders, or more than 600 ms without a fresh shoulder observation pause control and release held keys. The preview is windowed by default so it does not cover the game during arming.
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import math
 from statistics import median
 
-from tracking_quality import assess
+from tracking_quality import reliable
 
 
 POSE_TIMEOUT = .6
@@ -16,6 +16,7 @@ class Neutral:
     x: float
     y: float
     width: float
+    head_y: float | None = None
 
 
 class Movement:
@@ -46,8 +47,8 @@ class Movement:
         self.reset_actions()
 
     def update(self, points, age, now, confidence=.6):
-        _, visible = assess(points, age, confidence)
-        if not {11, 12} <= visible or age > POSE_TIMEOUT:
+        if (not points or len(points) <= 16 or age > POSE_TIMEOUT
+                or not all(reliable(points[index], confidence) for index in (11, 12))):
             self.reset_actions()
             if self.calibrating:
                 self.samples.clear()
@@ -62,12 +63,15 @@ class Movement:
         if self.calibrating:
             if self.sample_start is None:
                 self.sample_start = now
-            self.samples.append((x, y, width))
+            head_y = points[0].y if reliable(points[0], confidence) else None
+            self.samples.append((x, y, width, head_y))
             if now - self.sample_start >= 2 and len(self.samples) >= 10:
-                xs, ys, widths = zip(*self.samples)
+                xs, ys, widths, heads = zip(*self.samples)
                 scale = median(widths)
                 if max(xs) - min(xs) <= .15 * scale and max(ys) - min(ys) <= .15 * scale:
-                    self.neutral = Neutral(median(xs), median(ys), scale)
+                    head_values = [value for value in heads if value is not None]
+                    self.neutral = Neutral(median(xs), median(ys), scale,
+                                           median(head_values) if len(head_values) >= 8 else None)
                     self.calibrating = False
                 else:
                     self.samples.clear()
@@ -79,6 +83,8 @@ class Movement:
         # Display is mirrored: increasing raw-image x means moving screen-left.
         dx = (self.neutral.x - x) / self.neutral.width * self.sensitivity
         dy = (self.neutral.y - y) / self.neutral.width * self.sensitivity
+        head_drop = ((points[0].y - self.neutral.head_y) / self.neutral.width * self.sensitivity
+                     if self.neutral.head_y is not None and reliable(points[0], confidence) else 0)
         if dx <= -.20:
             self.horizontal = "Left"
         elif dx >= .20:
@@ -86,9 +92,9 @@ class Movement:
         elif not ((self.horizontal == "Left" and dx < -.12)
                   or (self.horizontal == "Right" and dx > .12)):
             self.horizontal = None
-        if dy <= -.25:
+        if dy <= -.17 or head_drop >= .25:
             self.ducking = True
-        elif dy >= -.12:
+        elif dy >= -.07 and head_drop <= .11:
             self.ducking = False
         if dy < .10:
             self.jump_ready = True
@@ -104,15 +110,84 @@ class Movement:
         return actions, True
 
 
+class ArmStrikes:
+    """One attack per deliberate wrist excursion and return; elbows are optional."""
+
+    HANDS = ((11, 15, "Square", "Cross"), (12, 16, "Triangle", "Circle"))
+
+    def __init__(self, sensitivity=1.0):
+        self.sensitivity = sensitivity
+        self.anchors = [None, None]
+        self.latched = [False, False]
+        self.ready = 0
+
+    def reset(self):
+        self.anchors = [None, None]
+        self.latched = [False, False]
+        self.ready = 0
+
+    def update(self, points, age, confidence=.6):
+        if not points or len(points) <= 16 or age > POSE_TIMEOUT:
+            self.reset()
+            return set()
+        if not all(reliable(points[index], confidence) for index in (11, 12)):
+            self.reset()
+            return set()
+        midpoint = (points[11].x + points[12].x) / 2
+        width = math.hypot(points[11].x - points[12].x, points[11].y - points[12].y)
+        if width < .05:
+            self.reset()
+            return set()
+        events = set()
+        self.ready = 0
+        for side, (shoulder, wrist, punch, kick) in enumerate(self.HANDS):
+            if not reliable(points[wrist], confidence):
+                self.anchors[side] = None
+                self.latched[side] = False
+                continue
+            distance = abs(points[wrist].x - midpoint) / width
+            height = (points[wrist].y - points[shoulder].y) / width
+            wrist_z = getattr(points[wrist], "z", None)
+            shoulder_z = getattr(points[shoulder], "z", None)
+            depth = ((wrist_z - shoulder_z) / width
+                     if wrist_z is not None and shoulder_z is not None
+                     and math.isfinite(wrist_z) and math.isfinite(shoulder_z) else None)
+            anchor = self.anchors[side]
+            if anchor is None:
+                if distance >= .15 and -.4 <= height <= .85:
+                    self.anchors[side] = (distance, height, depth)
+                    self.ready += 1
+                continue
+            self.ready += 1
+            inward = (anchor[0] - distance) * self.sensitivity
+            downward = (height - anchor[1]) * self.sensitivity
+            forward = ((anchor[2] - depth) * self.sensitivity
+                       if anchor[2] is not None and depth is not None else 0)
+            if self.latched[side]:
+                if abs(inward) < .13 and abs(downward) < .15 and abs(forward) < .15:
+                    self.latched[side] = False
+                    self.anchors[side] = (distance, height, depth)
+            elif downward >= .30 and downward > max(inward, forward):
+                events.add(kick)
+                self.latched[side] = True
+            elif inward >= .26 or forward >= .28:
+                events.add(punch)
+                self.latched[side] = True
+        return events
+
+
 class MovementController:
     def __init__(self, keyboard, bindings, sensitivity=1.0):
         self.keyboard = keyboard
         self.bindings = bindings
-        if set(bindings) != {"Left", "Right", "Up", "Down"}:
-            raise ValueError("Movement requires Left, Right, Up and Down bindings.")
-        if len({binding[0] for binding in bindings.values()}) != 4:
-            raise ValueError("Movement directions must have distinct keyboard bindings.")
+        expected = {"Left", "Right", "Up", "Down", "Square", "Triangle", "Cross", "Circle"}
+        if set(bindings) != expected:
+            raise ValueError("Control requires four directions and four attack bindings.")
+        if len({binding[0] for binding in bindings.values()}) != len(expected):
+            raise ValueError("Control actions must have distinct keyboard bindings.")
         self.movement = Movement(sensitivity)
+        self.strikes = ArmStrikes(sensitivity)
+        self.pulses = {}
         self.armed = False
         self.target = None
         self.last_pose = None
@@ -128,6 +203,8 @@ class MovementController:
         self.target = None
         self.desired.clear()
         self.movement.reset_actions()
+        self.strikes.reset()
+        self.pulses.clear()
         self.status = reason
         self.keyboard.release()
         self.held.clear()
@@ -155,16 +232,23 @@ class MovementController:
         self.target = target
         self.status = "ACTIVE: neutral"
         self.movement.reset_actions()
+        self.strikes.reset()
+        self.pulses.clear()
 
     def on_pose(self, points, age, now, confidence=.6):
         desired, valid = self.movement.update(points, age, now, confidence)
         if not valid:
             self.last_pose = None
             self.desired.clear()
+            self.strikes.reset()
+            self.pulses.clear()
             if self.armed:
                 self.pause("Tracking lost: paused; show both shoulders and arm again")
             return
         self.last_pose = now - age
+        if self.armed:
+            for action in self.strikes.update(points, age, confidence):
+                self.pulses[action] = now + .14
         if self.movement.calibrating:
             self.status = "Calibrating: sit comfortably and hold still for 2 seconds"
         elif self.movement.neutral is not None and not self.armed and self.arm_at is None:
@@ -200,6 +284,11 @@ class MovementController:
         desired = set() if self.keyboard.modifiers_down() else set(self.desired)
         if now >= self.movement.jump_until:
             desired.discard("Up")
+        for action, deadline in list(self.pulses.items()):
+            if now >= deadline:
+                del self.pulses[action]
+            elif not self.keyboard.modifiers_down():
+                desired.add(action)
         desired_keys = {self.bindings[action][0] for action in desired}
         try:
             for key in self.held - desired_keys:
@@ -211,4 +300,5 @@ class MovementController:
         except BaseException:
             self.pause("Input error: paused")
             raise
-        self.status = "ACTIVE: " + (" + ".join(sorted(desired)) if desired else "neutral")
+        self.status = ("ACTIVE: " + (" + ".join(sorted(desired)) if desired else "neutral")
+                       + f" | hands {self.strikes.ready}/2")

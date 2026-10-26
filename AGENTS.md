@@ -4,14 +4,14 @@
 
 Build ShadowPad, a local Windows webcam gesture controller for PPSSPP / Tekken 6, using only the upper body visible above a laptop on a table.
 
-Current scope includes camera tracking, PPSSPP input tests, calibrated left/right/jump/duck movement, latency instrumentation, public documentation, automated checks, and publication to the user's Shadow-Pad GitHub repository. Attack gesture recognition remains a future milestone. Do not change PPSSPP settings automatically; read its existing bindings.
+Current scope includes camera tracking, PPSSPP input tests, calibrated left/right/jump/duck movement, four wrist-based attack gestures, latency instrumentation, public documentation, automated checks, and publication to the user's Shadow-Pad GitHub repository. Do not change PPSSPP settings automatically; read its existing bindings.
 
 ## Implementation
 
 - Use Python, OpenCV, NumPy, and the MediaPipe Tasks Pose Landmarker API. The default is the official Full model with one person; Lite remains available for comparison.
 - Keep the first version small. Use a local virtual environment and pin dependencies after verification. No backend, cloud inference, database, custom model training, or virtual controller drivers are needed.
 - Treat shoulders, elbows, and wrists as the required tracked joints. Do not require legs or hips. Hidden or low-confidence joints must be reported as missing rather than accepted as reliable.
-- The user wants a large, relaxed camera view with minimal UI. Use the full camera frame without a framing box, sidebar, or guard-position requirement. Keep diagnostics behind Tab; F toggles fullscreen. Report shoulders/wrists separately when elbows are uncertain. Never lower confidence thresholds or invent elbow positions just to show 6/6. Future movement must depend on shoulders, not elbow readiness; punch-specific requirements belong to that later milestone.
+- The user wants a large, relaxed camera view with minimal UI. Use the full camera frame without a framing box or sidebar. Keep diagnostics behind Tab; F toggles fullscreen. Report shoulders/wrists separately when elbows are uncertain. Never lower confidence thresholds or invent elbow positions just to show 6/6. Movement must depend on shoulders, not elbow readiness; attacks require confident wrist observations and a visible chest-height guard.
 - Mirror the preview, preserve anatomical left/right joint labels, and explain which side is which.
 - Keep fresh frames; avoid an unbounded capture or inference queue. Label processing and result-age metrics accurately; they are not end-to-end game latency.
 - Release the webcam and close windows on exit and errors. Keep camera data in memory; do not record, save, or upload frames without a user request.

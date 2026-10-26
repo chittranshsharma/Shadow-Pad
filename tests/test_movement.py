@@ -1,13 +1,20 @@
 from types import SimpleNamespace
 import unittest
 
-from movement import Movement, MovementController, Neutral
+from movement import ArmStrikes, Movement, MovementController, Neutral
 
 
 def shoulders(x=.5, y=.4):
     points = [SimpleNamespace(x=.5, y=.5, visibility=0., presence=0.) for _ in range(33)]
     points[11] = SimpleNamespace(x=x-.2, y=y, visibility=.95, presence=.95)
     points[12] = SimpleNamespace(x=x+.2, y=y, visibility=.95, presence=.95)
+    return points
+
+
+def hands(left_x=.24, left_y=.52, right_x=.76, right_y=.52):
+    points = shoulders()
+    points[15] = SimpleNamespace(x=left_x, y=left_y, visibility=.95, presence=.95)
+    points[16] = SimpleNamespace(x=right_x, y=right_y, visibility=.95, presence=.95)
     return points
 
 
@@ -34,6 +41,15 @@ class MovementTests(unittest.TestCase):
             movement.update(shoulders(x=.5 + .1*(index%2)), .01, index*.21)
         self.assertIsNone(movement.neutral)
 
+    def test_calibration_records_head_when_visible(self):
+        movement = Movement()
+        movement.calibrate()
+        for index in range(11):
+            points = shoulders()
+            points[0] = SimpleNamespace(x=.5, y=.18, visibility=.95, presence=.95)
+            movement.update(points, .01, index*.21)
+        self.assertAlmostEqual(movement.neutral.head_y, .18)
+
     def test_mirrored_left_and_right_without_elbows(self):
         movement = self.engine()
         self.assertEqual(movement.update(shoulders(x=.6), .01, 3)[0], {"Left"})
@@ -49,6 +65,21 @@ class MovementTests(unittest.TestCase):
         movement = self.engine()
         self.assertEqual(movement.update(shoulders(x=.6, y=.52), .01, 3)[0], {"Left", "Down"})
         self.assertEqual(movement.update(shoulders(), .01, 3.1)[0], set())
+
+    def test_small_seated_dip_ducks_with_hysteresis(self):
+        movement = self.engine()
+        self.assertEqual(movement.update(shoulders(y=.47), .01, 3)[0], {"Down"})
+        self.assertEqual(movement.update(shoulders(y=.44), .01, 3.1)[0], {"Down"})
+        self.assertEqual(movement.update(shoulders(y=.42), .01, 3.2)[0], set())
+
+    def test_head_lowering_ducks_when_shoulders_barely_move(self):
+        movement = self.engine()
+        movement.neutral = Neutral(.5, .4, .4, .18)
+        points = shoulders(y=.42)
+        points[0] = SimpleNamespace(x=.5, y=.30, visibility=.95, presence=.95)
+        self.assertEqual(movement.update(points, .01, 3)[0], {"Down"})
+        points[0].y = .18
+        self.assertEqual(movement.update(points, .01, 3.1)[0], set())
 
     def test_jump_is_one_pulse_and_rearms_after_return(self):
         movement = self.engine()
@@ -100,7 +131,9 @@ class ControllerTests(unittest.TestCase):
     def setUp(self):
         self.keyboard = FakeKeyboard()
         self.controller = MovementController(self.keyboard, {"Left": (37,"Left"), "Right": (39,"Right"),
-                                                            "Up": (38,"Up"), "Down": (40,"Down")})
+                                                            "Up": (38,"Up"), "Down": (40,"Down"),
+                                                            "Square": (65,"A"), "Triangle": (83,"S"),
+                                                            "Cross": (90,"Z"), "Circle": (88,"X")})
         self.controller.movement.neutral = Neutral(.5,.4,.4)
         self.controller.on_pose(shoulders(), .01, 3)
 
@@ -168,6 +201,59 @@ class ControllerTests(unittest.TestCase):
         self.assertIn("PPSSPP was not the active window", self.controller.status)
         self.controller.on_pose(shoulders(), .01, 4.1)
         self.assertIn("PPSSPP was not the active window", self.controller.status)
+
+    def test_attack_tap_while_movement_is_held(self):
+        self.arm()
+        self.controller.on_pose(hands(), .01, 3.05)
+        moving = hands(left_x=.24, right_x=.76)
+        moving[11].x += .1
+        moving[12].x += .1
+        moving[15].x += .1
+        moving[16].x += .1
+        self.controller.on_pose(moving, .01, 3.10)
+        self.controller.tick(3.11)
+        self.assertIn(37, self.keyboard.keys)
+        self.controller.on_pose(hands(left_x=.40), .01, 3.12)
+        self.controller.tick(3.13)
+        self.assertIn(65, self.keyboard.keys)
+        self.controller.tick(3.30)
+        self.assertNotIn(65, self.keyboard.keys)
+
+
+class ArmStrikeTests(unittest.TestCase):
+    def test_each_hand_has_punch_and_kick_and_requires_return(self):
+        strikes = ArmStrikes()
+        self.assertEqual(strikes.update(hands(), .01), set())
+        self.assertEqual(strikes.ready, 2)
+        self.assertEqual(strikes.update(hands(left_x=.40), .01), {"Square"})
+        self.assertEqual(strikes.update(hands(left_x=.40), .01), set())
+        self.assertEqual(strikes.update(hands(), .01), set())
+        self.assertEqual(strikes.update(hands(left_y=.67), .01), {"Cross"})
+        self.assertEqual(strikes.update(hands(), .01), set())
+        self.assertEqual(strikes.update(hands(right_x=.60), .01), {"Triangle"})
+        self.assertEqual(strikes.update(hands(), .01), set())
+        self.assertEqual(strikes.update(hands(right_y=.67), .01), {"Circle"})
+
+    def test_missing_wrist_does_not_invent_attack(self):
+        strikes = ArmStrikes()
+        strikes.update(hands(), .01)
+        points = hands(left_x=.40)
+        points[15].visibility = .1
+        self.assertEqual(strikes.update(points, .01), set())
+        self.assertEqual(strikes.ready, 1)
+
+    def test_forward_fist_depth_triggers_punch(self):
+        strikes = ArmStrikes()
+        guard = hands()
+        for index in (11, 12, 15, 16):
+            guard[index].z = 0.0
+        strikes.update(guard, .01)
+        extended = hands()
+        for index in (11, 12, 15, 16):
+            extended[index].z = 0.0
+        extended[15].z = -.15
+        self.assertEqual(strikes.update(extended, .01), {"Square"})
+        self.assertEqual(strikes.update(extended, .01), set())
 
 
 if __name__ == "__main__":

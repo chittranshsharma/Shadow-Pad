@@ -15,7 +15,7 @@ import numpy as np
 from tracking_quality import CONNECTIONS, JOINTS, STALE_SECONDS, assess, framing_hints, joint_reason, tracking_label
 from performance import PipelineMetrics, environment, write_report
 from movement import MovementController
-from ppsspp_input import MOVEMENT_ACTIONS, WindowsKeyboard, default_controls, read_bindings
+from ppsspp_input import WindowsKeyboard, default_controls, read_bindings
 
 
 MODEL = Path(__file__).resolve().parent / "models" / "pose_landmarker_full.task"
@@ -218,7 +218,8 @@ def run(args):
            else "Camera-only mode; no game inputs."), flush=True)
     try:
         if args.control:
-            controller = MovementController(WindowsKeyboard(), read_bindings(args.controls, MOVEMENT_ACTIONS),
+            controller = MovementController(WindowsKeyboard(), read_bindings(args.controls,
+                                            ("Left", "Right", "Up", "Down", "Square", "Triangle", "Cross", "Circle")),
                                             args.sensitivity)
         tracker = Tracker(args.model.resolve(), args.confidence, args.warmup)
         camera = Camera(args.camera, args.backend)
