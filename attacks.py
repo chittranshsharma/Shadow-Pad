@@ -21,7 +21,7 @@ class HandObservation:
         return (self.side in ("Left", "Right")
                 and self.gesture in ("Closed_Fist", "Open_Palm")
                 and all(math.isfinite(value) for value in values)
-                and .7 <= self.score <= 1
+                and .5 <= self.score <= 1
                 and 0 <= self.x <= 1 and 0 <= self.y <= 1
                 and .018 <= self.width <= .6 and .018 <= self.length <= .6)
 
@@ -41,16 +41,19 @@ class HandState:
     growth_steps: int = 0
     returned_at: float | None = None
     cooldown_until: float = 0.0
+    reason: str = "show fist or palm"
 
-    def interrupt(self):
+    def interrupt(self, keep_learning=False):
         # Reacquiring an extended hand must never become a fresh strike.
         self.phase = "return" if self.anchor else "show hand"
-        self.recent.clear()
-        self.samples.clear()
-        self.last_time = None
-        self.last_position = None
+        if self.anchor or not keep_learning:
+            self.recent.clear()
+            self.samples.clear()
+            self.last_time = None
+            self.last_position = None
         self.returned_at = None
         self.growth_steps = 0
+        self.reason = "retract hand" if self.anchor else "show fist or palm"
 
 
 class HandAttacks:
@@ -68,9 +71,11 @@ class HandAttacks:
     def ready(self):
         return sum(state.phase in ("ready", "extending") for state in self.hands.values())
 
-    def interrupt(self):
+    def interrupt(self, keep_learning=False, reason=None):
         for state in self.hands.values():
-            state.interrupt()
+            state.interrupt(keep_learning)
+            if reason:
+                state.reason = reason
 
     def update(self, observations, timestamp, body):
         """Consume each capture timestamp once. Body is mirrored x, y, width."""
@@ -87,7 +92,20 @@ class HandAttacks:
         events = set()
         for side, state in self.hands.items():
             if len(grouped[side]) != 1:
-                state.interrupt()
+                state.interrupt(keep_learning=True)
+                visible = [hand for hand in observations if hand.side == side]
+                if len(visible) > 1:
+                    state.reason = "hand identity uncertain"
+                elif visible:
+                    hand = visible[0]
+                    if hand.gesture not in ("Closed_Fist", "Open_Palm"):
+                        state.reason = "make fist or open palm"
+                    elif hand.score < .5:
+                        state.reason = f"shape confidence {hand.score:.0%}"
+                    else:
+                        state.reason = "move hand closer / fully in view"
+                else:
+                    state.reason = "hand not detected"
                 continue
             hand = grouped[side][0]
             if state.gesture != hand.gesture:
@@ -108,30 +126,37 @@ class HandAttacks:
         state.last_time, state.last_position = now, position
         state.recent.append((hand.width, hand.length))
         if len(state.recent) < 3:
+            state.reason = "checking hand"
             return False
         width = median(value[0] for value in state.recent)
         length = median(value[1] for value in state.recent)
         if state.anchor is None:
             state.phase = "hold guard"
-            # A relaxed chest-height guard can be anywhere across the frame.
-            if not -.6 <= position[1] <= 1.0:
-                state.samples.clear()
-                return False
-            state.samples.append((now, width, length, *position, bw))
-            while state.samples and now - state.samples[0][0] > .6:
+            state.samples.append((now, width, length, *position, bw, hand.score))
+            while state.samples and now - state.samples[0][0] > .8:
                 state.samples.popleft()
-            if len(state.samples) < 4 or now - state.samples[0][0] < .3:
+            state.reason = f"hold still: {min(len(state.samples), 5)}/5"
+            if len(state.samples) < 5 or now - state.samples[0][0] < .3:
+                return False
+            if median(sample[6] for sample in state.samples) < .6:
+                state.reason = "shape uncertain: turn fist/palm toward lens"
                 return False
             for index in (1, 2):
                 values = [sample[index] for sample in state.samples]
-                if max(values) / min(values) > 1.12:
-                    state.samples.clear()
+                centre = median(values)
+                if median(abs(value - centre) for value in values) / centre > .08:
+                    state.reason = "hold hand still"
                     return False
-            if any(max(s[i] for s in state.samples) - min(s[i] for s in state.samples) > .15 for i in (3, 4)):
-                state.samples.clear()
+                half = len(values) // 2
+                if abs(median(values[:half]) - median(values[-half:])) / centre > .1:
+                    state.reason = "hold hand still"
+                    return False
+            if any(median(abs(s[i] - median(v[i] for v in state.samples)) for s in state.samples) > .08 for i in (3, 4)):
+                state.reason = "hold hand still"
                 return False
             state.anchor = tuple(median(s[i] for s in state.samples) for i in range(1, 6))
             state.phase = "ready"
+            state.reason = "ready"
             state.previous_ratio = state.ratio = 1
             return False
 
@@ -139,6 +164,7 @@ class HandAttacks:
         # Torso scale change means leaning/turning, not an isolated hand push.
         if not .85 <= bw / abw <= 1.15:
             state.interrupt()
+            state.reason = "body moved: return or press H"
             return False
         rw, rl = width / aw, length / al
         ratio = math.sqrt(rw * rl)
@@ -146,11 +172,13 @@ class HandAttacks:
         state.previous_ratio = state.ratio = ratio
         near_guard = rw < 1.13 and rl < 1.13 and math.dist(position, (ax, ay)) < .3
         if state.phase == "return":
+            state.reason = "retract hand"
             if near_guard and now >= state.cooldown_until:
                 if state.returned_at is None:
                     state.returned_at = now
                 elif now - state.returned_at >= .18:
                     state.phase = "ready"
+                    state.reason = "ready"
                     state.anchor = (width, length, *position, bw)
                     state.returned_at = None
                     state.growth_steps = 0
@@ -159,6 +187,7 @@ class HandAttacks:
             return False
         if state.phase == "ready" and ratio > 1.10:
             state.phase = "extending"
+            state.reason = "push forward"
             state.started = now
             state.growth_steps = 1 if ratio - previous > .035 else 0
             return False
@@ -167,12 +196,15 @@ class HandAttacks:
                 state.growth_steps += 1
             if ratio < 1.06:
                 state.phase = "ready"
+                state.reason = "ready"
                 state.growth_steps = 0
             elif now - state.started > .55 or ratio > 2.4:
                 state.phase = "return"
+                state.reason = "retract hand"
             elif (ratio >= 1.35 and min(rw, rl) >= 1.18 and .75 <= rw / rl <= 1.33
                   and state.growth_steps >= 2):
                 state.phase = "return"
+                state.reason = "attack detected: retract"
                 state.cooldown_until = now + .3
                 state.returned_at = None
                 return True

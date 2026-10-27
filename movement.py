@@ -191,7 +191,7 @@ class MovementController:
             self.last_pose = None
             self.body_history.clear()
             self.desired.clear()
-            self.strikes.reset()
+            self.strikes.interrupt(keep_learning=True, reason="waiting for shoulders")
             self.pulses.clear()
             self.last_attack = None
             if self.armed:
@@ -271,7 +271,7 @@ class MovementController:
             self.desired.clear()
             self.pulses.clear()
             self.last_attack = None
-            self.strikes.reset()
+            self.strikes.interrupt(keep_learning=True, reason="waiting for shoulders")
             self.movement.reset_actions()
             for key in list(self.held):
                 self.keyboard.release(key)
@@ -308,5 +308,5 @@ class MovementController:
             activity += f" | last {self.last_attack}"
         hands = f"hands {self.strikes.ready}/2"
         if self.strikes.ready == 0:
-            hands += " - show wrists at chest height"
+            hands += " | Tab: hand status"
         self.status = f"ACTIVE: {activity} | {hands}"

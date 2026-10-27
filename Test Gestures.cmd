@@ -17,7 +17,8 @@ if not exist "models\gesture_recognizer.task" (
 )
 echo ShadowPad gesture practice - no game keys are sent.
 echo Press C and sit still for two seconds, then press A to start.
-echo Hold a fist near your chest until READY, punch straight forward, then return.
+echo Hold a fist fully in view until READY, punch straight forward, then return.
+echo The model score does not need to reach 100 percent. Check the displayed reason.
 echo Use a forward open-palm push for the same-side kick button.
 echo Check that each movement increments only its matching counter once.
 echo H resets hand guards. A pauses/resumes practice. Q/Esc exits.

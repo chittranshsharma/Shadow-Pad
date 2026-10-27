@@ -19,7 +19,7 @@ echo ShadowPad movement controller
 echo 1. In the camera preview, press C and sit still for two seconds.
 echo 2. Press A in the preview, then click PPSSPP during the 5-second countdown.
 echo 3. Lean left/right, rise to jump, dip to duck.
-echo 4. Hold a closed fist at chest height until READY, then punch straight forward.
+echo 4. Hold a closed fist fully in view until READY, then punch straight forward.
 echo    Left/right closed fist = Square/Triangle. Open-palm forward push = Cross/Circle.
 echo    Return the hand after each attack. H resets guards; Tab shows diagnostics.
 echo    Test Gestures.cmd lets you check detections without sending game keys.

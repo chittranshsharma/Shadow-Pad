@@ -32,7 +32,7 @@ class HandTrackingTests(unittest.TestCase):
         self.assertEqual(len(outlines[0][1]), 5)
 
     def test_uncertain_classification_and_other_shapes_are_not_attacks(self):
-        for gesture, score in (("Closed_Fist", .5), ("Pointing_Up", .99), ("None", .99)):
+        for gesture, score in (("Closed_Fist", .4), ("Pointing_Up", .99), ("None", .99)):
             observations, _ = extract_hands(result(gesture, score), .75)
             self.assertFalse(observations[0].valid())
 

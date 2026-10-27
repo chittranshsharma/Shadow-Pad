@@ -55,6 +55,30 @@ class AttackTests(unittest.TestCase):
             self.assertEqual(self.feed(hand(1 + rng.uniform(-.06, .06),
                                             x=.3 + rng.uniform(-.008, .008))), set())
 
+    def test_consistent_sixty_percent_fist_can_learn_guard(self):
+        for index in range(20):
+            self.assertEqual(self.feed(hand(1 + (.04 if index % 2 else -.04), score=.62)), set())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
+    def test_uncertain_shape_explains_why_guard_is_blocked(self):
+        for _ in range(20):
+            self.assertEqual(self.feed(hand(score=.55)), set())
+        self.assertIsNone(self.engine.hands["Left"].anchor)
+        self.assertIn("shape uncertain", self.engine.hands["Left"].reason)
+
+    def test_one_low_confidence_frame_does_not_erase_guard_learning(self):
+        for _ in range(5):
+            self.feed(hand())
+        self.feed(hand(score=.4))
+        for _ in range(6):
+            self.feed(hand())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
+    def test_guard_has_no_chest_height_box(self):
+        for _ in range(14):
+            self.assertEqual(self.feed(hand(y=.9)), set())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
     def test_one_frame_scale_spike_does_not_fire(self):
         self.guard()
         self.assertEqual(self.feed(hand(1.9)), set())

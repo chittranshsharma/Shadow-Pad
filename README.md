@@ -146,12 +146,12 @@ Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm
 
 1. Open **Test Gestures.cmd**. This mode cannot send desktop keyboard events.
 2. Press **C**, sit naturally with your head and shoulders visible, and hold still for about two seconds.
-3. Press **A** to start practice. Hold one closed fist near your chest with knuckles facing the camera until its state says **ready**. Learning a hand guard takes roughly half a second of stable observations.
+3. Press **A** to start practice. Hold one closed fist in a comfortable starting position, fully in view, with knuckles facing the camera until its state says **ready**. There is no chest-height gate or framing box. Learning a hand guard takes roughly half a second of stable observations.
 4. Punch straight toward the camera, keeping the same hand orientation, then retract to the starting guard. The matching Square/Triangle counter should increase once.
 5. For a kick button, open that hand, hold the palm facing the camera until **ready**, push it straight forward, and retract. The matching Cross/Circle counter should increase once.
 6. Keep hands still for 20 seconds; counters should remain unchanged. Check ten deliberate attempts per action before using game control. Practice results are recognition events, not proof of Tekken response.
 
-The preview shows the actual hand-shape label and confidence, each hand's state, and its size relative to guard (`1.00x` at guard). **H** relearns hand guards without recalibrating shoulders; **A** pauses/resumes practice. The left/right labels refer to your anatomical hands, using mirrored hand-model input as in Google's official example. The kick controls are deliberate hand proxies because the laptop view does not include your legs.
+The preview shows the actual hand-shape label and score, each hand's state and blocking reason, and its size relative to guard (`1.00x` at guard). The score is model confidence, not measured recognition accuracy, and does not need to reach 100%. A five-sample temporal check establishes confidence instead of demanding one high score on every frame. **H** relearns hand guards without recalibrating shoulders; **A** pauses/resumes practice. The left/right labels refer to your anatomical hands, using mirrored hand-model input as in Google's official example. The kick controls are deliberate hand proxies because the laptop view does not include your legs.
 
 ### 4. Play in PPSSPP
 

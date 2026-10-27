@@ -209,17 +209,17 @@ def control_overlay(canvas, controller, outlines, practice=False, details=False)
         color = GREEN if state.phase == "ready" else AMBER
         cv2.polylines(canvas, [polygon], True, color, 2, cv2.LINE_AA)
         x, y = map(int, polygon[1])
-        label = f"{observation.side}: {observation.gesture} {observation.score:.0%}"
+        label = f"{observation.side}: {observation.gesture} score {observation.score:.0%}"
         put(canvas, label, (max(5, min(x, canvas.shape[1] - 300)), max(50, y - 12)), color, .45)
     expanded = practice or details
-    footer_height = 80 if expanded else 30
+    footer_height = 100 if expanded else 30
     canvas[-footer_height:] = (24, 24, 24)
     put(canvas, ("PRACTICE | " if practice else "") + controller.status,
-        (12, canvas.shape[0] - (59 if expanded else 11)), scale=.42)
+        (12, canvas.shape[0] - (79 if expanded else 11)), scale=.42)
     if expanded:
-        states = " | ".join(f"{side}: {state.phase} {state.ratio:.2f}x"
-                            for side, state in controller.strikes.hands.items())
-        put(canvas, states, (12, canvas.shape[0] - 36), scale=.45)
+        for row, (side, state) in enumerate(controller.strikes.hands.items()):
+            status = f"{side}: {state.phase} | {state.reason} | {state.ratio:.2f}x"
+            put(canvas, status, (12, canvas.shape[0] - 56 + row * 22), scale=.4)
         counts = "  ".join(f"{action} {count}" for action, count in controller.attack_counts.items())
         put(canvas, counts + "   C: calibrate  A: arm  H: reset hands", (12, canvas.shape[0] - 12), scale=.38)
     return canvas
