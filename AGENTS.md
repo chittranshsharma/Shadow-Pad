@@ -8,7 +8,7 @@ Current scope includes camera tracking, PPSSPP input tests, calibrated left/righ
 
 ## Implementation
 
-- Use Python, OpenCV, NumPy, and the MediaPipe Tasks Pose Landmarker API. The default is the official Full model with one person; Lite remains available for comparison.
+- Use Python, OpenCV, NumPy, and the MediaPipe Tasks Pose Landmarker API. The default is the official Full model with one person; Lite remains available for comparison. Attacks use the official Gesture Recognizer hand model for fist/palm classification and measured palm expansion. Do not infer attacks from pose wrist depth.
 - Keep the first version small. Use a local virtual environment and pin dependencies after verification. No backend, cloud inference, database, custom model training, or virtual controller drivers are needed.
 - Treat shoulders, elbows, and wrists as the required tracked joints. Do not require legs or hips. Hidden or low-confidence joints must be reported as missing rather than accepted as reliable.
 - The user wants a large, relaxed camera view with minimal UI. Use the full camera frame without a framing box or sidebar. Keep diagnostics behind Tab; F toggles fullscreen. Report shoulders/wrists separately when elbows are uncertain. Never lower confidence thresholds or invent elbow positions just to show 6/6. Movement must depend on shoulders, not elbow readiness; attacks require confident wrist observations and a visible chest-height guard.

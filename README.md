@@ -11,18 +11,19 @@
 
 ShadowPad explores playing a fighting game through body movement and arm gestures using a laptop webcam. Its foundation is a local processing engine: continuous capture, asynchronous pose estimation, confidence-aware tracking, native Windows input, and reproducible performance reports.
 
-**Current release:** upper-body movement and four wrist-based attack gestures, a camera preview, and a separate button tester. The button tester and left/right/jump gestures have been confirmed working by the user. Duck and attack gestures need a live Tekken acceptance run.
+**Current release:** shoulder movement plus an experimental dedicated hand recognizer for straight forward attacks, a practice window that sends no game keys, and a separate button tester. The button tester and left/right/jump gestures are user-confirmed. The previous wrist-only attack detector was unreliable and has been replaced; the new hand detector still needs labeled live gameplay evaluation.
 
 ## What works today
 
 - **Upper-body tracking:** shoulders, elbows, and wrists; legs and hips are not required.
 - **Full camera view:** mirrored windowed preview, no restrictive framing box, optional fullscreen with `F` and diagnostics with `Tab`.
-- **Local AI inference:** MediaPipe Pose Landmarker Full, with Lite available for comparison.
-- **Freshness-first processing:** one latest capture slot and at most one application-managed inference request in flight.
+- **Local AI inference:** MediaPipe Pose Landmarker Full for the body and Gesture Recognizer for hand landmarks and fist/palm classification; Pose Lite is available for comparison.
+- **Freshness-first processing:** one latest capture slot and at most one application-managed request in flight per model.
 - **Honest tracking states:** hidden, out-of-frame, low-confidence, and stale observations stay distinguishable.
 - **Native input tester:** reads PPSSPP keyboard bindings, explicitly arms one bounded action, and checks foreground focus.
 - **Calibrated movement:** mirrored left/right lean, upper-body rise to jump, and dip to duck; shoulder-width normalization and hysteresis reduce dependence on distance and jitter.
-- **Four attack gestures:** left/right fist thrusts diagonally forward and inward for Square/Triangle, left/right hand drives downward for Cross/Circle. Strikes are confirmed across consecutive results and require a return to guard before repeating.
+- **Four attack gestures:** straight forward closed-fist pushes for Square/Triangle and open-palm pushes for Cross/Circle. Measured palm expansion, shape confidence, stable guard, motion progression, and return checks gate each short button press.
+- **Practice first:** Test Gestures.cmd shows the detected hand shape, guard state, palm-size ratio, and attack counts through a keyboard adapter that cannot send native inputs.
 - **Performance instrumentation:** timing percentiles, warmup exclusion, bounded sample retention, throughput, and aggregate JSON reports.
 - **Automated verification:** camera-independent tests and a Windows GitHub Actions workflow.
 
@@ -32,7 +33,7 @@ ShadowPad explores playing a fighting game through body movement and arm gesture
 |---|---|---|
 | Runtime | Python 3.14, standard library | Concurrency, CLI, configuration, reporting, tests |
 | Camera and preview | OpenCV contrib | Windows capture backends, full-frame display, image conversion |
-| AI / computer vision | MediaPipe Tasks, Pose Landmarker | Pretrained body-landmark estimation on the laptop |
+| AI / computer vision | MediaPipe Tasks, Pose Landmarker + Gesture Recognizer | Pretrained body landmarks, hand landmarks, fist/palm classification |
 | Image data | NumPy | Frame arrays and preview operations |
 | Tracking engine | Confidence checks, monotonic timestamps | Joint reliability and stale-result rejection |
 | Input adapter | `ctypes`, Win32 `SendInput` | Scan-code key-down/key-up and process-focus checks |
@@ -41,7 +42,7 @@ ShadowPad explores playing a fighting game through body movement and arm gesture
 
 ### Where the AI is
 
-MediaPipe runs a pretrained pose-estimation model to infer body landmarks from camera images. ShadowPad then applies deterministic confidence and state rules to those results. It does not train a model, call an LLM, or require a paid inference API.
+MediaPipe runs pretrained body, hand-landmark, and hand-shape models on camera images. ShadowPad then applies deterministic motion and state rules to the results. The hand model classifies static fist/palm shapes; ShadowPad detects the forward motion. No custom model training or paid inference API is required.
 
 The backend is an **on-device processing engine**. Its concurrency, bounded buffering, input state machine, and instrumentation are the engineering focus. An HTTP service, database, and authentication layer are not needed for the current control loop.
 
@@ -52,6 +53,9 @@ flowchart LR
     Camera[Webcam] --> Capture[Capture worker]
     Capture --> Latest[Latest frame slot]
     Latest --> Pose[Async pose inference]
+    Latest --> Hands[Async hand inference]
+    Hands --> Attacks[Shape and palm-expansion checks]
+    Attacks --> Guard
     Pose --> Quality[Confidence and freshness checks]
     Quality --> Preview[Full-frame preview]
     Pose --> Metrics[Bounded timing and quality metrics]
@@ -64,7 +68,7 @@ flowchart LR
     Movement --> Guard
 ```
 
-Camera-only mode, the movement controller, and input tests have separate launchers. Movement input uses shoulders, so missing elbows do not block it. Landmarks are drawn on the exact frame that produced them, preserving alignment instead of overlaying old results on a newer image.
+Camera-only mode, gesture practice, game control, and input tests have separate launchers. Movement uses shoulders; attacks use the dedicated hand model. Missing pose elbows do not block either. In hand mode, hand outlines are drawn on their matching inference frame; older pose skeletons are not drawn over that frame.
 
 ## Quick start
 
@@ -76,7 +80,7 @@ cd Shadow-Pad
 powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-Setup creates `.venv`, installs the pinned direct dependencies, and downloads the official Full model with a fixed SHA-256 check. The PowerShell flag applies to that invocation; it does not change the saved system policy.
+Setup creates `.venv`, installs the pinned direct dependencies, and downloads the official Full pose and Gesture Recognizer models with fixed SHA-256 checks. The PowerShell flag applies to that invocation; it does not change the saved system policy. Existing installations can add the hand model with `download_model.py --variant hands`; both gesture launchers also download it if missing.
 
 ### 1. Check the camera
 
@@ -138,7 +142,18 @@ For a portable installation or a different memory stick:
 
 Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm any game-specific control overrides manually. Release physical keyboard/modifier keys before a test and run both apps at the same privilege level.
 
-### 3. Play with movement gestures
+### 3. Check hand gestures without game inputs
+
+1. Open **Test Gestures.cmd**. This mode cannot send desktop keyboard events.
+2. Press **C**, sit naturally with your head and shoulders visible, and hold still for about two seconds.
+3. Press **A** to start practice. Hold one closed fist near your chest with knuckles facing the camera until its state says **ready**. Learning a hand guard takes roughly half a second of stable observations.
+4. Punch straight toward the camera, keeping the same hand orientation, then retract to the starting guard. The matching Square/Triangle counter should increase once.
+5. For a kick button, open that hand, hold the palm facing the camera until **ready**, push it straight forward, and retract. The matching Cross/Circle counter should increase once.
+6. Keep hands still for 20 seconds; counters should remain unchanged. Check ten deliberate attempts per action before using game control. Practice results are recognition events, not proof of Tekken response.
+
+The preview shows the actual hand-shape label and confidence, each hand's state, and its size relative to guard (`1.00x` at guard). **H** relearns hand guards without recalibrating shoulders; **A** pauses/resumes practice. The left/right labels refer to your anatomical hands, using mirrored hand-model input as in Google's official example. The kick controls are deliberate hand proxies because the laptop view does not include your legs.
+
+### 4. Play in PPSSPP
 
 1. Open Tekken Practice mode and double-click **Play ShadowPad.cmd**.
 2. In the camera preview, press **C**, sit naturally, and hold still for about **two seconds**. Wait for **Calibrated**.
@@ -152,13 +167,13 @@ Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm
 | Lean toward the right side | Right held |
 | Raise your upper body above neutral | Up held for 0.30 seconds, then released |
 | Dip your shoulders below neutral | Down held while dipped |
-| Punch your left fist diagonally forward and inward from chest-height guard | Square (left punch) |
-| Punch your right fist diagonally forward and inward from chest-height guard | Triangle (right punch) |
-| Drive your left hand down from guard | Cross (left kick input) |
-| Drive your right hand down from guard | Circle (right kick input) |
+| Left closed-fist push straight toward the camera, then retract | Square (left punch) |
+| Right closed-fist push straight toward the camera, then retract | Triangle (right punch) |
+| Left open-palm push straight toward the camera, then retract | Cross (left kick input) |
+| Right open-palm push straight toward the camera, then retract | Circle (right kick input) |
 | Return toward centre | Movement released; jump can re-arm |
 
-With an upper-body camera, the jump gesture is a rise/straighten motion; feet leaving the floor are not detected. Duck accepts either a shoulder dip or a clear head lowering when the head was visible during calibration. Up/Down are normal PSP directions, so Tekken's current mode, character state, and configured controls determine the resulting jump/crouch. Left/right can combine with a rise or dip. For attacks, start with both hands visible near chest height and apart from the centre. The preview footer shows `hands 2/2` when both wrists have a usable guard; `hands 0/2` means neither hand has an established guard yet. Move diagonally forward/inward for a punch or drive the hand down for a kick button. Hold the end position briefly, then return to guard before repeating. A straight punch toward a single camera without visible sideways change is hard to distinguish from noisy estimated depth, so the inward component matters. The kick mappings are hand gestures for the PSP kick buttons; no leg tracking is involved. Elbows are not required. Keep the laptop camera stationary after calibration. Press **C** in the preview only after changing the camera or seated position.
+With an upper-body camera, jump is a rise/straighten motion; feet leaving the floor are not detected. Duck accepts a shoulder dip or a clear head lowering when the head was visible during calibration. Up/Down are PSP directions, so Tekken's current state and configured controls determine the resulting jump/crouch. For attacks, keep the whole hand in frame and hold the same fist/palm orientation while pushing. Rotation, tiny hands, blur, occlusion, or unreliable shape classification can block recognition. Opening a fist learns a new palm guard and does not itself trigger a kick. Keep the camera stationary; use **C** after changing camera/seating position and **H** to relearn hands. **Tab** shows hand states and counters in game mode.
 
 For smaller movements, increase sensitivity (allowed range 0.5–2):
 
@@ -166,7 +181,7 @@ For smaller movements, increase sensitivity (allowed range 0.5–2):
 .\.venv\Scripts\python.exe webcam_tracker.py --control --sensitivity 1.5
 ```
 
-The current activation offsets are 0.20 neutral shoulder-width units for horizontal movement, 0.28 upward for jump, and 0.17 downward for duck or 0.25 for head lowering, divided by sensitivity. Lower release thresholds provide hysteresis. Jump fires once per rise and re-arms after returning near neutral. Attacks require a stable two-result guard and two matching strike results: 0.25 shoulder widths inward, or 0.45 estimated depth units forward with at least 0.08 inward, for a punch; 0.30 shoulder widths downward for a kick input. Elbows and wrists are not prerequisites for movement; confident wrists are needed only for attacks.
+Movement sensitivity affects shoulders only. Attacks use a separate conservative detector: a three-result median filters palm dimensions; a stable guard establishes scale; at least two growth steps, at least 35% combined expansion, growth in both palm dimensions, and a short motion window are required. Pose depth is unused. A strike sends one 120 ms press and needs retraction plus a cooldown before it can repeat. This is experimental geometry on top of pretrained hand classification, not a trained punch detector.
 
 ## Measure performance
 
@@ -184,6 +199,8 @@ Compare Lite under the same setup:
 ```
 
 Reports contain environment/model identifiers, aggregate timing statistics, throughput, and joint-reliability counts. They contain **no video frames or landmark coordinates**. Existing files are not overwritten. Generated reports are Git-ignored by default.
+
+To exercise both models without game inputs, add `--practice --headless --seconds 60 --report reports/both-models-01.json`. This headless diagnostic stays paused and cannot evaluate gesture recognition without an interactive calibration. `hand_pipeline` reports all hand callbacks and their submission-to-callback timing, including warmup; the pose pipeline's warmup exclusion does not apply to hand timings.
 
 | Metric | What it tells you |
 |---|---|
@@ -215,6 +232,8 @@ CI runs these camera-independent checks on Windows/Python 3.14. It does not exer
 ```text
 webcam_tracker.py          Capture worker, async inference, preview, report integration
 movement.py                Neutral calibration, movement gestures, continuous-input guards
+attacks.py                 Shape-gated forward motion, guard/strike/return states
+hand_tracking.py           Dedicated local hand model, geometry extraction, async results
 tracking_quality.py        Confidence/freshness rules and honest tracking labels
 ppsspp_input.py            Binding reader, bounded input state machine, Win32 adapter
 input_check.py             Inspection-only / explicitly armed input-test CLI
@@ -235,7 +254,8 @@ docs/                      Architecture and benchmarking methodology
 - [x] Calibrate neutral shoulders; add left/right movement with a dead zone and hysteresis
 - [x] Add upper-body rise/dip gestures for jump and duck
 - [x] Confirm left/right/jump in Tekken (user acceptance)
-- [x] Detect independent wrist strikes with one activation per ready/strike/return cycle
+- [x] Replace unreliable pose-wrist attacks with dedicated hand classification and palm-expansion checks
+- [x] Add gesture practice with no native input and visible per-action counters
 - [x] Add attack gestures to movement control with tracking-loss release behavior
 - [ ] Validate duck and attack gestures in Tekken and tune sensitivity
 - [ ] Measure gesture precision/recall, false activations, and motion-to-game latency
@@ -244,7 +264,8 @@ docs/                      Architecture and benchmarking methodology
 
 - **Camera unavailable:** close other camera apps; try `--camera 1` or `--backend msmf`. Check Windows camera permission yourself if required.
 - **Elbows unreliable:** bring more of the torso into the image and avoid table/body occlusion. The Full model is available, but its elbow improvement in the development setup is not established.
-- **Attacks do not fire:** check the footer for `hands 2/2`. If it says `hands 0/2`, show both wrists at chest height and hold still briefly. Press `Tab` to inspect wrist status; if they are below frame, angle the camera down slightly. Establish guard for two pose results, make the strike and hold the end position for about a quarter second, then return to guard.
+- **Attacks do not fire:** use Test Gestures.cmd and inspect the hand label/state. Show a complete fist/palm near chest height until **ready**, keep its orientation, then push toward the lens and retract. If it remains **return**, move back to guard; H resets hand guards if your posture changed. A hand absent from the image cannot be detected.
+- **Unexpected attacks:** practice at rest and inspect which counter changes. Classification and geometric motion remain experimental; no measured live accuracy or false-activation rate is claimed. Report the hand label, state, and counter affected so the failure can be reproduced.
 - **A brief tracking gap:** held inputs release immediately and resume after two good shoulder results. Keep PPSSPP focused; changing focus still pauses the controller.
 - **Input cancelled:** PPSSPP must be foreground at key-down and throughout the short hold.
 - **Input rejected:** check equal app privilege levels and the actual configured keyboard bindings.
@@ -257,4 +278,4 @@ Input cleanup handles normal exits, exceptions, cancellation, and detected focus
 
 ShadowPad keeps camera images in memory and does not record or explicitly upload them. MediaPipe documents on-device input processing and possible performance/utilization telemetry; local inference is not a promise of zero library telemetry. Model downloads use Google's official host and fixed checksums. Emulator binaries, game images, model binaries, and local reports are not committed.
 
-Built with [MediaPipe Pose Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/python), [OpenCV](https://docs.opencv.org/), and [Windows SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput). Control integration targets [PPSSPP](https://www.ppsspp.org/docs/settings/controls/); saved key codes follow its [input definitions](https://github.com/hrydgard/ppsspp/blob/master/Common/Input/KeyCodes.h). This project is independent of PPSSPP and Tekken.
+Built with [MediaPipe Pose Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/python), [Gesture Recognizer](https://developers.google.com/edge/mediapipe/solutions/vision/gesture_recognizer/python), [OpenCV](https://docs.opencv.org/), and [Windows SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput). Control integration targets [PPSSPP](https://www.ppsspp.org/docs/settings/controls/); saved key codes follow its [input definitions](https://github.com/hrydgard/ppsspp/blob/master/Common/Input/KeyCodes.h). This project is independent of PPSSPP and Tekken.

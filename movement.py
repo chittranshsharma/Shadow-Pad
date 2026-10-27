@@ -6,6 +6,7 @@ import math
 from statistics import median
 
 from tracking_quality import reliable
+from attacks import HandAttacks
 
 
 POSE_TIMEOUT = .6
@@ -110,101 +111,10 @@ class Movement:
         return actions, True
 
 
-class ArmStrikes:
-    """Confirm a strike across results, then require a return to guard."""
-
-    HANDS = ((11, 15, "Square", "Cross"), (12, 16, "Triangle", "Circle"))
-
-    def __init__(self, sensitivity=1.0):
-        self.sensitivity = sensitivity
-        self.reset()
-
-    def reset(self):
-        self.anchors = [None, None]
-        self.latched = [False, False]
-        self.guards = [[], []]
-        self.candidates = [None, None]
-        self.returns = [0, 0]
-        self.misses = [0, 0]
-        self.ready = 0
-
-    def update(self, points, age, confidence=.6):
-        if not points or len(points) <= 16 or age > POSE_TIMEOUT:
-            self.reset()
-            return set()
-        if not all(reliable(points[index], confidence) for index in (11, 12)):
-            self.reset()
-            return set()
-        midpoint = (points[11].x + points[12].x) / 2
-        width = math.hypot(points[11].x - points[12].x, points[11].y - points[12].y)
-        if width < .05:
-            self.reset()
-            return set()
-        events = set()
-        self.ready = 0
-        for side, (shoulder, wrist, punch, kick) in enumerate(self.HANDS):
-            if not reliable(points[wrist], confidence):
-                self.misses[side] += 1
-                self.candidates[side] = None
-                if self.misses[side] > 2:
-                    self.anchors[side] = None
-                    self.guards[side].clear()
-                    self.latched[side] = False
-                continue
-            self.misses[side] = 0
-            distance = abs(points[wrist].x - midpoint) / width
-            height = (points[wrist].y - points[shoulder].y) / width
-            wrist_z = getattr(points[wrist], "z", None)
-            shoulder_z = getattr(points[shoulder], "z", None)
-            depth = ((wrist_z - shoulder_z) / width
-                     if wrist_z is not None and shoulder_z is not None
-                     and math.isfinite(wrist_z) and math.isfinite(shoulder_z) else None)
-            anchor = self.anchors[side]
-            if anchor is None:
-                if distance >= .15 and -.4 <= height <= .85:
-                    self.guards[side].append((distance, height, depth))
-                    self.guards[side] = self.guards[side][-3:]
-                    if len(self.guards[side]) >= 2:
-                        first, last = self.guards[side][0], self.guards[side][-1]
-                        if abs(first[0] - last[0]) < .12 and abs(first[1] - last[1]) < .12:
-                            self.anchors[side] = last
-                        else:
-                            self.guards[side] = [last]
-                else:
-                    self.guards[side].clear()
-                continue
-            self.ready += 1
-            inward = (anchor[0] - distance) * self.sensitivity
-            downward = (height - anchor[1]) * self.sensitivity
-            forward = ((anchor[2] - depth) * self.sensitivity
-                       if anchor[2] is not None and depth is not None else 0)
-            if self.latched[side]:
-                if abs(inward) < .13 and abs(downward) < .15:
-                    self.returns[side] += 1
-                else:
-                    self.returns[side] = 0
-                if self.returns[side] >= 2:
-                    self.latched[side] = False
-                    self.anchors[side] = (distance, height, depth)
-                    self.returns[side] = 0
-                continue
-            action = None
-            if downward >= .30 and downward > inward * 1.2:
-                action = kick
-            elif inward >= .25 or (forward >= .45 and inward >= .08):
-                action = punch
-            previous, count = self.candidates[side] or (None, 0)
-            self.candidates[side] = (action, count + 1) if action and action == previous else ((action, 1) if action else None)
-            if self.candidates[side] and self.candidates[side][1] >= 2:
-                events.add(action)
-                self.latched[side] = True
-                self.candidates[side] = None
-        return events
-
-
 class MovementController:
     def __init__(self, keyboard, bindings, sensitivity=1.0):
         self.keyboard = keyboard
+        self.practice = getattr(keyboard, "is_practice", False)
         self.bindings = bindings
         expected = {"Left", "Right", "Up", "Down", "Square", "Triangle", "Cross", "Circle"}
         if set(bindings) != expected:
@@ -212,8 +122,12 @@ class MovementController:
         if len({binding[0] for binding in bindings.values()}) != len(expected):
             raise ValueError("Control actions must have distinct keyboard bindings.")
         self.movement = Movement(sensitivity)
-        self.strikes = ArmStrikes(sensitivity)
+        self.strikes = HandAttacks()
         self.pulses = {}
+        self.attack_counts = {action: 0 for action in ("Square", "Triangle", "Cross", "Circle")}
+        self.body = None
+        self.body_history = deque(maxlen=16)
+        self.last_hand_result = None
         self.last_attack = None
         self.last_attack_at = 0
         self.armed = False
@@ -235,6 +149,7 @@ class MovementController:
         self.strikes.reset()
         self.pulses.clear()
         self.last_attack = None
+        self.last_hand_result = None
         self.recovering = 0
         self.status = reason
         self.keyboard.release()
@@ -248,7 +163,8 @@ class MovementController:
         if self.movement.neutral is None:
             self.status = "Calibrate first: press C in this preview"
             return
-        self.pause(f"ARMING: click PPSSPP within {seconds:g} seconds")
+        self.pause(f"Practice starts in {seconds:g} seconds" if self.practice
+                   else f"ARMING: click PPSSPP within {seconds:g} seconds")
         self.arm_at = now + seconds
 
     def _arm(self, now):
@@ -266,12 +182,14 @@ class MovementController:
         self.strikes.reset()
         self.pulses.clear()
         self.last_attack = None
+        self.last_hand_result = None
         self.recovering = 0
 
     def on_pose(self, points, age, now, confidence=.6):
         desired, valid = self.movement.update(points, age, now, confidence)
         if not valid:
             self.last_pose = None
+            self.body_history.clear()
             self.desired.clear()
             self.strikes.reset()
             self.pulses.clear()
@@ -281,6 +199,10 @@ class MovementController:
                 self.status = "TRACKING GAP: keys released; recovering automatically"
             return
         self.last_pose = now - age
+        self.body = (1 - (points[11].x + points[12].x) / 2,
+                     (points[11].y + points[12].y) / 2,
+                     math.hypot(points[11].x - points[12].x, points[11].y - points[12].y))
+        self.body_history.append((self.last_pose, self.body))
         if self.armed and self.recovering:
             self.recovering += 1
             if self.recovering < 3:
@@ -289,17 +211,37 @@ class MovementController:
                 self.status = "TRACKING: reacquiring shoulders"
                 return
             self.recovering = 0
-        if self.armed:
-            for action in self.strikes.update(points, age, confidence):
-                self.pulses[action] = now + .14
-                self.last_attack = action
-                self.last_attack_at = now
         if self.movement.calibrating:
             self.status = "Calibrating: sit comfortably and hold still for 2 seconds"
         elif self.movement.neutral is not None and not self.armed and self.arm_at is None:
             if self.status.startswith("Calibrating:"):
-                self.status = "Calibrated | press A here, then click PPSSPP"
+                self.status = ("Calibrated | A starts practice" if self.practice
+                               else "Calibrated | press A here, then click PPSSPP")
         self.desired = desired if self.armed else set()
+
+    def on_hands(self, observations, timestamp, now):
+        if not self.armed or self.recovering:
+            return
+        if (self.keyboard.modifiers_down() or self.last_pose is None or now - self.last_pose > .3
+                or not 0 <= now - timestamp <= .3 or not self.body_history):
+            self.strikes.interrupt()
+            self.pulses.clear()
+            return
+        body_time, body = min(self.body_history, key=lambda sample: abs(sample[0] - timestamp))
+        if abs(body_time - timestamp) > .2:
+            self.strikes.interrupt()
+            self.pulses.clear()
+            return
+        self.last_hand_result = timestamp
+        for side, actions in (("Left", ("Square", "Cross")), ("Right", ("Triangle", "Circle"))):
+            if sum(hand.side == side and hand.valid() for hand in observations) != 1:
+                for action in actions:
+                    self.pulses.pop(action, None)
+        for action in self.strikes.update(observations, timestamp, body):
+            self.pulses[action] = now + .12
+            self.last_attack = action
+            self.last_attack_at = now
+            self.attack_counts[action] += 1
 
     def tick(self, now):
         if self.arm_at is not None:
@@ -307,7 +249,8 @@ class MovementController:
                 self.arm_at = None
                 self._arm(now)
             else:
-                self.status = f"ARMING: click PPSSPP | {self.arm_at - now:.1f}s"
+                self.status = (f"Practice starts in {self.arm_at - now:.1f}s" if self.practice
+                               else f"ARMING: click PPSSPP | {self.arm_at - now:.1f}s")
         toggle = self.keyboard.pause_requested()
         if toggle and not self.toggle_was_down:
             if self.armed:
@@ -336,6 +279,12 @@ class MovementController:
             self.status = "TRACKING GAP: keys released; recovering automatically"
             return
         desired = set() if self.keyboard.modifiers_down() else set(self.desired)
+        if self.keyboard.modifiers_down():
+            self.pulses.clear()
+            self.strikes.interrupt()
+        if self.last_hand_result is None or now - self.last_hand_result > .3:
+            self.strikes.interrupt()
+            self.pulses.clear()
         if now >= self.movement.jump_until:
             desired.discard("Up")
         for action, deadline in list(self.pulses.items()):

@@ -1,20 +1,14 @@
 from types import SimpleNamespace
 import unittest
 
-from movement import ArmStrikes, Movement, MovementController, Neutral
+from movement import Movement, MovementController, Neutral
+from attacks import HandObservation
 
 
 def shoulders(x=.5, y=.4):
     points = [SimpleNamespace(x=.5, y=.5, visibility=0., presence=0.) for _ in range(33)]
     points[11] = SimpleNamespace(x=x-.2, y=y, visibility=.95, presence=.95)
     points[12] = SimpleNamespace(x=x+.2, y=y, visibility=.95, presence=.95)
-    return points
-
-
-def hands(left_x=.24, left_y=.52, right_x=.76, right_y=.52):
-    points = shoulders()
-    points[15] = SimpleNamespace(x=left_x, y=left_y, visibility=.95, presence=.95)
-    points[16] = SimpleNamespace(x=right_x, y=right_y, visibility=.95, presence=.95)
     return points
 
 
@@ -227,119 +221,44 @@ class ControllerTests(unittest.TestCase):
         self.controller.on_pose(shoulders(), .01, 4.1)
         self.assertIn("PPSSPP was not the active window", self.controller.status)
 
-    def test_attack_tap_while_movement_is_held(self):
+    def test_forward_hand_attack_combines_with_movement_and_releases(self):
         self.arm()
-        self.controller.on_pose(hands(), .01, 3.05)
-        self.controller.on_pose(hands(), .01, 3.07)
-        moving = hands(left_x=.24, right_x=.76)
-        moving[11].x += .1
-        moving[12].x += .1
-        moving[15].x += .1
-        moving[16].x += .1
-        self.controller.on_pose(moving, .01, 3.10)
-        self.controller.tick(3.11)
+        now = 3.05
+        observed_attack = False
+        for scale in [1] * 14 + [1.08, 1.16, 1.28, 1.45, 1.6, 1.6]:
+            self.controller.on_pose(shoulders(x=.6), .01, now)
+            observation = HandObservation("Left", "Closed_Fist", .95, .3, .5, .05 * scale, .08 * scale)
+            self.controller.on_hands([observation], now - .01, now)
+            self.controller.tick(now + .005)
+            self.assertIn(37, self.keyboard.keys)
+            observed_attack |= 65 in self.keyboard.keys
+            now += .05
+        self.assertTrue(observed_attack)
+        self.assertEqual(self.controller.attack_counts["Square"], 1)
+        self.controller.on_hands([], now - .01, now)
+        self.controller.tick(now + .005)
+        self.assertNotIn(65, self.keyboard.keys)
         self.assertIn(37, self.keyboard.keys)
-        self.controller.on_pose(hands(left_x=.40), .01, 3.12)
-        self.controller.tick(3.13)
-        self.assertNotIn(65, self.keyboard.keys)
-        self.controller.on_pose(hands(left_x=.40), .01, 3.15)
-        self.controller.tick(3.16)
-        self.assertIn(65, self.keyboard.keys)
-        self.controller.tick(3.30)
-        self.assertNotIn(65, self.keyboard.keys)
 
+    def test_stale_hand_results_cannot_fire_or_keep_attack_held(self):
+        self.arm()
+        self.controller.pulses["Square"] = 5
+        self.controller.last_hand_result = 2
+        self.controller.tick(3.1)
+        self.assertEqual(self.keyboard.keys, set())
+        self.controller.on_hands([HandObservation("Left", "Closed_Fist", .95, .3, .5, .09, .12)], 2, 3.1)
+        self.assertEqual(self.controller.attack_counts["Square"], 0)
 
-class ArmStrikeTests(unittest.TestCase):
-    def test_each_hand_has_punch_and_kick_and_requires_return(self):
-        strikes = ArmStrikes()
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.ready, 2)
-        self.assertEqual(strikes.update(hands(left_x=.40), .01), set())
-        self.assertEqual(strikes.update(hands(left_x=.40), .01), {"Square"})
-        self.assertEqual(strikes.update(hands(left_x=.40), .01), set())
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.update(hands(left_y=.67), .01), set())
-        self.assertEqual(strikes.update(hands(left_y=.67), .01), {"Cross"})
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.update(hands(right_x=.60), .01), set())
-        self.assertEqual(strikes.update(hands(right_x=.60), .01), {"Triangle"})
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.update(hands(), .01), set())
-        self.assertEqual(strikes.update(hands(right_y=.67), .01), set())
-        self.assertEqual(strikes.update(hands(right_y=.67), .01), {"Circle"})
-
-    def test_missing_wrist_does_not_invent_attack(self):
-        strikes = ArmStrikes()
-        strikes.update(hands(), .01)
-        strikes.update(hands(), .01)
-        strikes.update(hands(), .01)
-        points = hands(left_x=.40)
-        points[15].visibility = .1
-        self.assertEqual(strikes.update(points, .01), set())
-        self.assertEqual(strikes.ready, 1)
-
-    def test_forward_fist_depth_triggers_punch(self):
-        strikes = ArmStrikes()
-        guard = hands()
-        for index in (11, 12, 15, 16):
-            guard[index].z = 0.0
-        strikes.update(guard, .01)
-        strikes.update(guard, .01)
-        strikes.update(guard, .01)
-        extended = hands()
-        for index in (11, 12, 15, 16):
-            extended[index].z = 0.0
-        extended[15].x = .28
-        extended[15].z = -.20
-        self.assertEqual(strikes.update(extended, .01), set())
-        self.assertEqual(strikes.update(extended, .01), {"Square"})
-        self.assertEqual(strikes.update(extended, .01), set())
-
-    def test_one_frame_wrist_jump_does_not_press(self):
-        strikes = ArmStrikes()
-        for _ in range(3):
-            strikes.update(hands(), .01)
-        self.assertEqual(strikes.update(hands(left_x=.40), .01), set())
-        self.assertEqual(strikes.update(hands(), .01), set())
-
-    def test_depth_noise_alone_does_not_fire_punch(self):
-        strikes = ArmStrikes()
-        guard = hands()
-        for index in (11, 12, 15, 16):
-            guard[index].z = 0.0
-        for _ in range(3):
-            strikes.update(guard, .01)
-        noisy = hands()
-        for index in (11, 12, 15, 16):
-            noisy[index].z = 0.0
-        noisy[15].z = -.4
-        self.assertEqual(strikes.update(noisy, .01), set())
-        self.assertEqual(strikes.update(noisy, .01), set())
-
-    def test_two_missing_wrist_results_preserve_guard(self):
-        strikes = ArmStrikes()
-        for _ in range(3):
-            strikes.update(hands(), .01)
-        missing = hands()
-        missing[15].visibility = .1
-        strikes.update(missing, .01)
-        strikes.update(missing, .01)
-        self.assertIsNotNone(strikes.anchors[0])
-        strikes.update(missing, .01)
-        self.assertIsNone(strikes.anchors[0])
-
-    def test_wrists_below_frame_cannot_arm_attacks(self):
-        strikes = ArmStrikes()
-        below = hands()
-        below[15].y = below[16].y = 1.2
-        for _ in range(4):
-            self.assertEqual(strikes.update(below, .01), set())
-        self.assertEqual(strikes.ready, 0)
-
+    def test_modifiers_cancel_attack_instead_of_delaying_it(self):
+        self.arm()
+        self.controller.pulses["Square"] = 4
+        self.controller.last_hand_result = 3.05
+        self.keyboard.modifiers = True
+        self.controller.tick(3.1)
+        self.keyboard.modifiers = False
+        self.controller.tick(3.11)
+        self.assertEqual(self.keyboard.keys, set())
+        self.assertEqual(self.controller.pulses, {})
 
 if __name__ == "__main__":
     unittest.main()

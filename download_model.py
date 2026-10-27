@@ -1,4 +1,4 @@
-"""Download a versioned official pose model; never fetch camera data."""
+"""Download versioned official pose/hand models; never fetch camera data."""
 
 from pathlib import Path
 import hashlib
@@ -9,13 +9,15 @@ import urllib.request
 MODEL_HASHES = {
     "full": "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1",
     "lite": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a",
+    "hands": "97952348cf6a6a4915c2ea1496b4b37ebabc50cbbf80571435643c455f2b0482",
 }
 
 
 def download(variant="full"):
-    MODEL_PATH = Path(__file__).resolve().parent / "models" / f"pose_landmarker_{variant}.task"
-    MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
-                 f"pose_landmarker_{variant}/float16/1/pose_landmarker_{variant}.task")
+    name = "gesture_recognizer" if variant == "hands" else f"pose_landmarker_{variant}"
+    family = "gesture_recognizer" if variant == "hands" else "pose_landmarker"
+    MODEL_PATH = Path(__file__).resolve().parent / "models" / f"{name}.task"
+    MODEL_URL = f"https://storage.googleapis.com/mediapipe-models/{family}/{name}/float16/1/{name}.task"
     MODEL_SHA256 = MODEL_HASHES[variant]
     MODEL_PATH.parent.mkdir(exist_ok=True)
     if MODEL_PATH.is_file() and hashlib.sha256(MODEL_PATH.read_bytes()).hexdigest() == MODEL_SHA256:

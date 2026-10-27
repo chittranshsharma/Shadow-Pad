@@ -2,7 +2,7 @@
 
 Current implementation supports a useful systems/computer-vision project description:
 
-> Built a Windows webcam controller using Python, OpenCV, and on-device MediaPipe pose estimation; implemented calibrated shoulder movement and wrist-based attack gestures with focus-aware native input and tracking-loss release handling.
+> Built a Windows webcam controller using Python, OpenCV, and on-device MediaPipe pose and hand models; implemented calibrated shoulder movement and shape-gated forward hand gestures with guarded native input and a practice mode that sends no desktop keys.
 
 Additional evidence-backed bullets:
 

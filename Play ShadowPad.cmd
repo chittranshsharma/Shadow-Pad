@@ -7,13 +7,22 @@ if not exist ".venv\Scripts\python.exe" (
     popd
     exit /b 1
 )
+if not exist "models\gesture_recognizer.task" (
+    ".venv\Scripts\python.exe" download_model.py --variant hands
+    if errorlevel 1 (
+        pause
+        popd
+        exit /b 1
+    )
+)
 echo ShadowPad movement controller
 echo 1. In the camera preview, press C and sit still for two seconds.
 echo 2. Press A in the preview, then click PPSSPP during the 5-second countdown.
 echo 3. Lean left/right, rise to jump, dip to duck.
-echo 4. Hands at chest: left/right forward or inward punch = Square/Triangle.
-echo    Left/right downward hand strike = Cross/Circle. Hold 1/4 sec, return to guard.
-echo    Preview should show hands 2/2; Tab explains missing wrists.
+echo 4. Hold a closed fist at chest height until READY, then punch straight forward.
+echo    Left/right closed fist = Square/Triangle. Open-palm forward push = Cross/Circle.
+echo    Return the hand after each attack. H resets guards; Tab shows diagnostics.
+echo    Test Gestures.cmd lets you check detections without sending game keys.
 echo Ctrl+Alt+P pauses or arms directly. Focus loss pauses and releases inputs.
 echo Q/Esc in the preview exits.
 ".venv\Scripts\python.exe" webcam_tracker.py --control %*

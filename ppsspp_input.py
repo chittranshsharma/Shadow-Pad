@@ -9,6 +9,7 @@ import time
 
 ACTIONS = ("Left", "Right", "Square", "Triangle", "Cross", "Circle")
 MOVEMENT_ACTIONS = ("Left", "Right", "Up", "Down")
+CONTROL_ACTIONS = MOVEMENT_ACTIONS + ("Square", "Triangle", "Cross", "Circle")
 SPECIAL_KEYS = {19: (0x26, "Up"), 20: (0x28, "Down"),
                 21: (0x25, "Left arrow"), 22: (0x27, "Right arrow"),
                 62: (0x20, "Space"), 66: (0x0D, "Enter")}
@@ -115,6 +116,33 @@ class INPUTUNION(ctypes.Union):
 
 class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("data", INPUTUNION)]
+
+
+class PracticeKeyboard:
+    """No native APIs: identical control decisions with no desktop key events."""
+
+    is_practice = True
+
+    def __init__(self):
+        self.held = set()
+
+    def foreground_ppsspp(self):
+        return (0, 0)
+
+    def pause_requested(self):
+        return False
+
+    def modifiers_down(self):
+        return False
+
+    def press(self, vk, target):
+        self.held.add(vk)
+
+    def release(self, vk=None):
+        if vk is None:
+            self.held.clear()
+        else:
+            self.held.discard(vk)
 
 
 class WindowsKeyboard:

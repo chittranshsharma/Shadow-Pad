@@ -5,10 +5,10 @@ ShadowPad is a Windows desktop computer-vision prototype. Its processing engine 
 ## Data path and concurrency
 
 1. A capture worker continuously calls OpenCV `read()` and replaces one latest-frame slot under a lock. There is no growing camera-frame queue.
-2. The main loop submits only when the pose tracker has no application-managed request in flight. Intermediate captures can be superseded intentionally.
-3. The tracker sends RGB data through MediaPipe's asynchronous Tasks API. Resizing preserves the complete image and aspect ratio; no framing rectangle restricts inference.
-4. The callback pairs normalized landmarks with the original full camera frame. It records metrics independently of whether the main loop consumes every result.
-5. The main loop rejects stale observations, mirrors the matching frame for display, and renders a minimal status. Diagnostics are optional.
+2. The main loop submits independently to pose and hand trackers, each with at most one application-managed request in flight. Intermediate captures can be superseded intentionally.
+3. Pose inference uses MediaPipe Pose Landmarker; hand inference uses Gesture Recognizer for 21 hand landmarks, handedness, and static fist/palm labels. RGB conversion preserves the complete frame.
+4. Each callback pairs its result with the exact input frame and records aggregate timing metrics.
+5. The main loop rejects stale observations, evaluates body movement and hand motion, and reconciles desired keys. In hand mode, display uses the matching hand-model frame and does not overlay an older pose skeleton.
 
 Capture and inference buffers are bounded. The timing collector retains at most 4,096 samples per timing series; counters and cumulative sums remain constant-size. One processed frame and a pending frame can coexist with the latest capture. MediaPipe/OpenCV internal buffers and native allocations are outside these application-level bounds.
 
@@ -16,7 +16,7 @@ Capture and inference buffers are bounded. The timing collector retains at most 
 
 Both presence and visibility must pass the configured threshold, default 0.6, and coordinates must be finite and inside the image. Required upper-body indices are 11–16. Hips and legs do not affect the quality decision. Results older than 500 ms are not reliable observations.
 
-Inference uses the original image. Only display coordinates are mirrored, preserving anatomical left/right labels. Shoulders and wrists are reported separately when elbows are uncertain. A geometric elbow guess is not accepted as reliable detection.
+Pose inference uses the original image; pose display coordinates are mirrored. Hand inference uses mirrored input, following Google's sample handedness convention. Hand landmarks must be finite and wholly in-frame; handedness and fist/palm scores must each reach 0.7. The model's hand presence/detection/tracking thresholds are 0.6. Handedness confidence is a classification score, not a substitute for a presence score. Pose elbows remain optional for control.
 
 ## Input state machine
 
@@ -38,15 +38,21 @@ Cleanup attempts key-up even after an uncertain input failure. Windows keyboard 
 
 `movement.py` samples stable shoulder midpoints for two seconds and normalizes offsets by neutral shoulder width. It also samples a visible head to support seated ducking. Horizontal and duck controls use different engage/release thresholds. A rise produces one 300 ms Up hold; returning near neutral re-arms it. Left/right and vertical actions can combine. Missing elbows do not gate these shoulder-based controls.
 
-Two independent wrist state machines require two stable guard observations and two consecutive matching strike observations. An inward wrist excursion, or forward wrist-versus-shoulder depth change paired with inward movement, fires the same-side punch button; a downward excursion fires the same-side kick button. Each key is held for at most 140 ms and will not repeat until two return-to-guard observations. One or two missing wrist results do not erase the guard; longer loss resets that hand only. The preview shows how many hands have a usable guard. Pose depth from a single camera is noisy, so depth alone never fires an attack.
+The prior pose-wrist attack heuristic was removed after repeated false activations and missed strikes in live use. `attacks.py` now consumes dedicated hand observations. Fist forward pushes map to punch buttons; palm forward pushes map to kick buttons. Palm width uses index-to-pinky knuckles and palm length uses wrist-to-middle knuckle; distances account for image aspect ratio. A three-result median filters both dimensions. At least four stable observations over 300 ms learn a guard. A forward strike needs at least 35% combined expansion, growth in both dimensions, similar aspect ratio, two growth steps, and a 550 ms motion window. Pose depth is unused.
+
+Each recognized strike requests one 120 ms button pulse. Retraction and a 300 ms cooldown prevent repeats. Opening a fist relearns the hand-shape baseline; lowering a hand cannot trigger a kick. Missing/uncertain/duplicate hands interrupt their state and require return before another attack. Large position jumps, stale timestamps, and torso-width changes reject continuity. These rules reduce known failure modes in deterministic tests; real camera accuracy remains to be measured.
 
 The controller starts paused, calibrates with C in the preview, and starts a five-second arm countdown with A so the user can focus PPSSPP. Ctrl+Alt+P also arms directly while PPSSPP is foreground or pauses an active session. A hotkey rising-edge check prevents repeated toggles while held. Modifier keys suppress injection until released. Every new result updates the desired key set; a separate tick reconciles releases and presses and expires the Up pulse even between model callbacks. Foreground loss pauses control. Invalid shoulders or more than 600 ms without a fresh shoulder observation release all keys, then two good results restore control automatically without recalibration. The preview is windowed by default so it does not cover the game during arming.
+
+Hand events require both pose and hand observations younger than 300 ms. Stale or missing hand observations clear attack pulses while shoulder movement can continue. Test Gestures.cmd selects `PracticeKeyboard`, which has no native API calls; it runs the same calibration, motion detector, pulse, and counter logic. A starts/pauses practice, H resets only hand guards, and no PPSSPP focus is needed in practice.
 
 ## Timing boundaries
 
 Durations use a monotonic clock. Camera timestamps are recorded after `read()` returns and quantized to milliseconds for MediaPipe. Submit-to-result starts before RGB conversion/optional resizing and ends at callback entry; it is not isolated neural-network execution time. Read-to-result includes scheduling and preprocessing after camera delivery.
 
 The callback collector counts every completed result. The main loop's observed-result counter can miss results while rendering. Reports stop capture and drain pending inference before taking final counters. Throughput spans capture startup through that drain, including camera warmup and shutdown. Timing warmup is a separate result-count exclusion.
+
+`hand_pipeline.submit_to_result` includes all hand callbacks from preprocessing start through callback extraction, including warmup. It is reported separately from pose timing. The hand model name/hash and recognition event counts are included; event counts do not prove delivery or game response.
 
 Current metrics do not measure camera exposure, physical gesture onset, labeled gesture accuracy, emulator response, or display latency. JSON reports include model/dependency identifiers, configuration, and basic hardware details. They contain no frames, coordinates, hostnames, usernames, or absolute model paths.
 

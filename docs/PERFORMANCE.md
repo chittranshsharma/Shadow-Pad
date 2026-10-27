@@ -21,6 +21,8 @@ Download Lite with `download_model.py --variant lite` and add `--model models/po
 
 Headless and preview runs are different workloads. Headless mode skips display-only mirroring/copies and rendering. Do not mix their results or claim an optimization without equivalent before/after conditions.
 
+Use `--practice --headless --seconds 60 --report reports/both-models-01.json` to measure capture with both body and hand models active without sending keys. Hand inference always mirrors its input for handedness. Headless practice stays paused, so this workload measures inference and does not score forward strikes. Interactive Test Gestures.cmd is required to calibrate and count actual attempts.
+
 ## Interpret the JSON
 
 - `pipeline.submit_to_result`: submission/preprocessing start to callback entry.
@@ -32,12 +34,16 @@ Headless and preview runs are different workloads. Headless mode skips display-o
 - `capture_fps` and `completed_result_fps`: throughput over the capture-to-drain interval, including startup/shutdown.
 - `captured_frames_not_submitted`: captures intentionally superseded or left at shutdown. This is not a camera-loss error rate.
 - `quality_all_results`: presence and per-joint reliability counts, including warmup. A fast run with missing arms is not automatically better.
+- `hand_pipeline`: hand callback count, results with hand observations, and submission-to-result timings. These samples include hand warmup and finish after landmark extraction in the callback; do not combine them with the pose timing series.
+- `recognized_attacks`: motion events from the hand detector. Counts can be checked against labeled attempts, but do not prove native key delivery or visible game response.
 
 Compare median and tail latency alongside throughput and tracking coverage. P99 from few samples is weak evidence; include counts, repetitions, model hashes, and hardware in published results.
 
 ## Metrics still to build
 
 After gesture integration, label actual movement/strike attempts and measure precision, recall, false activations per minute, missed actions, and re-arm timing. Use the same evaluation protocol across configurations.
+
+For the current hand detector, first hold hands still for 20 seconds with practice running, then perform ten attempts for each action. Record the actual hand class shown, intended action, counter that changed, and whether an extra press occurred. Repeat across lighting and camera distances before presenting an accuracy claim.
 
 Motion-to-visible-game latency requires physical motion and screen response on a common timebase, such as a suitable high-frame-rate external recording with consent. A `SendInput` return timestamp cannot establish that latency. Distinguish recognition delay from game-animation timing.
 
