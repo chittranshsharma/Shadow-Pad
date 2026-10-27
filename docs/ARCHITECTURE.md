@@ -1,6 +1,6 @@
 # Engine design
 
-ShadowPad is a Windows desktop computer-vision prototype. Its processing engine and input adapter are independent of the preview layout. There is no HTTP service or database in the current implementation.
+ShadowPad is a Windows and Apple Silicon macOS computer-vision prototype. Its processing engine and input adapter are independent of the preview layout. There is no HTTP service or database in the current implementation.
 
 ## Data path and concurrency
 
@@ -34,9 +34,9 @@ stateDiagram-v2
     HOLDING --> CANCELLED: pause, focus loss, or error / key-up
 ```
 
-The checker reads supported device-1 keyboard bindings from PPSSPP's controls file and ignores gamepad bindings. A Win32 process query checks the foreground executable before key-down; focus is checked again during the hold. Physical key/modifier interference blocks the action. Tests hold for at most one second and finish paused.
+The checker reads supported device-1 keyboard bindings from PPSSPP's controls file and ignores gamepad bindings. Windows queries the foreground executable via Win32; macOS checks the frontmost app via NSWorkspace. Both check focus before key-down and again during the hold. Physical key/modifier interference blocks the action. Tests hold for at most one second and finish paused.
 
-Cleanup attempts key-up even after an uncertain input failure. Windows keyboard state is global, so cleanup releases are global. Foreground queries and `SendInput` are not atomic; forced kills and driver/process stalls also limit cleanup guarantees. Native delivery and visible game response require separate manual checks.
+Cleanup attempts key-up even after an uncertain input failure. Desktop keyboard state is global, so cleanup releases are global. Foreground queries and input posting are not atomic; forced kills and driver/process stalls also limit cleanup guarantees. macOS requires Accessibility permission for Quartz input. Native delivery and visible game response require separate manual checks.
 
 ## Calibrated movement
 

@@ -1,8 +1,10 @@
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from ppsspp_input import BoundedTest, WindowsKeyboard, read_bindings
+from ppsspp_input import BoundedTest, MacKeyboard, WindowsKeyboard, default_controls, native_keyboard, read_bindings
 
 
 class FakeKeyboard:
@@ -125,6 +127,47 @@ class InputTestTests(unittest.TestCase):
         keyboard.release(37)
         self.assertEqual(set(keyboard.held), {40})
         self.assertEqual(len(calls), 1)
+
+    def test_mac_control_file_uses_ppsspp_memory_stick(self):
+        with patch("ppsspp_input.sys.platform", "darwin"):
+            self.assertEqual(default_controls(), Path.home() / ".config/ppsspp/PSP/SYSTEM/controls.ini")
+
+    def test_mac_key_down_requires_focus_and_releases_each_key(self):
+        keyboard = MacKeyboard.__new__(MacKeyboard)
+        keyboard.held = {}
+        keyboard.foreground_ppsspp = lambda: 42
+        keyboard.modifiers_down = lambda: False
+        keyboard.down = lambda code: False
+        events = []
+        keyboard._post = lambda code, pressed: events.append((code, pressed))
+        keyboard.press(65, 42)
+        keyboard.press(0x25, 42)
+        self.assertEqual(events, [(0, True), (123, True)])
+        keyboard.release(65)
+        keyboard.release()
+        self.assertEqual(events[-2:], [(0, False), (123, False)])
+        self.assertEqual(keyboard.held, {})
+        with self.assertRaisesRegex(RuntimeError, "lost focus"):
+            keyboard.press(65, 43)
+        self.assertEqual(len(events), 4)
+
+    def test_mac_pause_shortcut_and_modifiers(self):
+        keyboard = MacKeyboard.__new__(MacKeyboard)
+        q = SimpleNamespace(kCGEventSourceStateHIDSystemState=1,
+                            kCGEventFlagMaskShift=1, kCGEventFlagMaskControl=2,
+                            kCGEventFlagMaskAlternate=4, kCGEventFlagMaskCommand=8,
+                            CGEventSourceFlagsState=lambda source: 6,
+                            CGEventSourceKeyState=lambda source, code: code == 35)
+        keyboard.quartz = q
+        self.assertTrue(keyboard.pause_requested())
+        self.assertTrue(keyboard.modifiers_down())
+        q.CGEventSourceKeyState = lambda source, code: False
+        self.assertFalse(keyboard.pause_requested())
+
+    def test_native_keyboard_rejects_unsupported_platform(self):
+        with patch("ppsspp_input.sys.platform", "linux"):
+            with self.assertRaisesRegex(RuntimeError, "Windows and macOS"):
+                native_keyboard()
 
 
 if __name__ == "__main__":

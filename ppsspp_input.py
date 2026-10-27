@@ -4,6 +4,7 @@ import configparser
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
+import sys
 import time
 
 
@@ -17,8 +18,11 @@ SPECIAL_KEYS = {19: (0x26, "Up"), 20: (0x28, "Down"),
 
 def default_controls():
     """Find the existing Documents memory stick without hard-coding this user's name."""
-    candidates = (Path.home() / "OneDrive/Documents/PPSSPP/PSP/SYSTEM/controls.ini",
-                  Path.home() / "Documents/PPSSPP/PSP/SYSTEM/controls.ini")
+    if sys.platform == "darwin":
+        candidates = (Path.home() / ".config/ppsspp/PSP/SYSTEM/controls.ini",)
+    else:
+        candidates = (Path.home() / "OneDrive/Documents/PPSSPP/PSP/SYSTEM/controls.ini",
+                      Path.home() / "Documents/PPSSPP/PSP/SYSTEM/controls.ini")
     return next((path for path in candidates if path.is_file()), candidates[0])
 
 
@@ -227,11 +231,100 @@ class WindowsKeyboard:
             raise errors[0]
 
 
+# Quartz virtual key codes use physical US keyboard positions.
+MAC_KEYCODES = dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                        (0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46,
+                         45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16, 6)))
+MAC_KEYCODES.update({0x25: 123, 0x27: 124, 0x28: 125, 0x26: 126,
+                     0x20: 49, 0x0D: 36})
+
+
+class MacKeyboard:
+    """Quartz input gated by the frontmost PPSSPP app and Accessibility trust."""
+
+    def __init__(self):
+        if sys.platform != "darwin":
+            raise RuntimeError("Mac keyboard input requires macOS.")
+        from AppKit import NSWorkspace
+        import Quartz
+
+        services = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        services.AXIsProcessTrusted.restype = ctypes.c_bool
+        if not services.AXIsProcessTrusted():
+            raise RuntimeError("Grant Accessibility access to your Terminal/Python app in macOS System Settings, then restart ShadowPad.")
+        self.workspace = NSWorkspace.sharedWorkspace()
+        self.quartz = Quartz
+        self.held = {}
+
+    def foreground_ppsspp(self):
+        app = self.workspace.frontmostApplication()
+        if app is None or app.executableURL() is None:
+            return None
+        if str(app.executableURL().lastPathComponent()).casefold() in ("ppsspp", "ppssppsdl"):
+            return app.processIdentifier()
+        return None
+
+    def down(self, code):
+        return bool(self.quartz.CGEventSourceKeyState(self.quartz.kCGEventSourceStateHIDSystemState, code))
+
+    def modifiers_down(self):
+        q = self.quartz
+        flags = q.CGEventSourceFlagsState(q.kCGEventSourceStateHIDSystemState)
+        return bool(flags & (q.kCGEventFlagMaskShift | q.kCGEventFlagMaskControl |
+                             q.kCGEventFlagMaskAlternate | q.kCGEventFlagMaskCommand))
+
+    def pause_requested(self):
+        q = self.quartz
+        flags = q.CGEventSourceFlagsState(q.kCGEventSourceStateHIDSystemState)
+        return bool(flags & q.kCGEventFlagMaskControl and flags & q.kCGEventFlagMaskAlternate
+                    and self.down(MAC_KEYCODES["P"]))
+
+    def _post(self, code, pressed):
+        q = self.quartz
+        event = q.CGEventCreateKeyboardEvent(None, code, pressed)
+        if event is None:
+            raise RuntimeError("macOS could not create a keyboard event.")
+        q.CGEventPost(q.kCGHIDEventTap, event)
+
+    def press(self, vk, target):
+        if self.foreground_ppsspp() != target:
+            raise RuntimeError("PPSSPP lost focus before key-down; input cancelled.")
+        code = MAC_KEYCODES.get(chr(vk) if 65 <= vk <= 90 else vk)
+        if code is None:
+            raise ValueError("This PPSSPP keyboard binding has no macOS key mapping.")
+        if self.down(code) or self.modifiers_down():
+            raise RuntimeError("Release physical keys and modifiers, then retry.")
+        self.held[vk] = code
+        self._post(code, True)
+
+    def release(self, vk=None):
+        errors = []
+        for key in list(self.held) if vk is None else [vk]:
+            if key not in self.held:
+                continue
+            try:
+                self._post(self.held[key], False)
+            except Exception as error:
+                errors.append(error)
+            else:
+                del self.held[key]
+        if errors:
+            raise errors[0]
+
+
+def native_keyboard():
+    if sys.platform == "win32":
+        return WindowsKeyboard()
+    if sys.platform == "darwin":
+        return MacKeyboard()
+    raise RuntimeError("Game input supports Windows and macOS only. Use --practice here.")
+
+
 def execute_test(action, binding, delay=3, hold=0.12):
-    backend = WindowsKeyboard()
+    backend = native_keyboard()
     test = BoundedTest(backend)
     print(f"ARMED: {action} -> {binding[1]}. Click PPSSPP within {delay:g} seconds.", flush=True)
-    print("Hold Ctrl+Alt+P to cancel. Each action automatically returns to paused.", flush=True)
+    print("Hold Ctrl+Alt+P (Mac: Control+Option+P) to cancel. Each action automatically returns to paused.", flush=True)
     test.arm(binding[0], delay, hold, time.monotonic())
     try:
         while test.state in ("COUNTDOWN", "HOLDING"):

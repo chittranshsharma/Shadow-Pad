@@ -1,0 +1,3 @@
+# Installed after requirements.txt on macOS only.
+pyobjc-framework-Cocoa==12.2.2
+pyobjc-framework-Quartz==12.2.2

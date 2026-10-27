@@ -19,7 +19,7 @@ from movement import MovementController
 from attacks import DEFAULT_ATTACK_SENSITIVITY
 from hand_tracking import HAND_MODEL, HandTracker
 from hand_identity import body_references
-from ppsspp_input import CONTROL_ACTIONS, PracticeKeyboard, WindowsKeyboard, default_controls, read_bindings
+from ppsspp_input import CONTROL_ACTIONS, PracticeKeyboard, native_keyboard, default_controls, read_bindings
 
 
 MODEL = Path(__file__).resolve().parent / "models" / "pose_landmarker_full.task"
@@ -39,13 +39,16 @@ class Camera:
         self.error = None
         self.frames = 0
         self.started = time.monotonic()
-        api = cv2.CAP_DSHOW if backend == "dshow" else cv2.CAP_MSMF
+        api = {"dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF,
+               "avfoundation": cv2.CAP_AVFOUNDATION}.get(backend)
+        if api is None:
+            raise ValueError(f"Unsupported camera backend: {backend}")
         self.capture = cv2.VideoCapture(index, api)
         if not self.capture.isOpened():
             self.capture.release()
             raise RuntimeError(
                 f"Cannot open camera {index} ({backend}). Close other camera apps, "
-                "check Windows camera privacy settings, or try --camera 1 / --backend msmf."
+                "check camera permissions, or try --camera 1 / another --backend."
             )
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -263,7 +266,7 @@ def run(args):
         if use_hands:
             bindings = ({action: (index + 1, action) for index, action in enumerate(CONTROL_ACTIONS)}
                         if practice else read_bindings(args.controls, CONTROL_ACTIONS))
-            controller = MovementController(PracticeKeyboard() if practice else WindowsKeyboard(),
+            controller = MovementController(PracticeKeyboard() if practice else native_keyboard(),
                                             bindings, args.sensitivity, getattr(args, "attack_sensitivity", DEFAULT_ATTACK_SENSITIVITY))
             hand_tracker = HandTracker(hand_model.resolve())
         tracker = Tracker(args.model.resolve(), args.confidence, args.warmup)
@@ -462,7 +465,8 @@ def run(args):
 def arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--camera", type=int, default=0, help="Webcam index (default: 0)")
-    parser.add_argument("--backend", choices=("dshow", "msmf"), default="dshow")
+    parser.add_argument("--backend", choices=("dshow", "msmf", "avfoundation"),
+                        default="avfoundation" if sys.platform == "darwin" else "dshow")
     parser.add_argument("--model", type=Path, default=MODEL)
     parser.add_argument("--hand-model", type=Path, default=HAND_MODEL)
     parser.add_argument("--confidence", type=float, default=0.6,
@@ -479,6 +483,8 @@ def arguments():
     parser.add_argument("--attack-sensitivity", type=float, default=DEFAULT_ATTACK_SENSITIVITY,
                         help="Attack reach sensitivity, 0.5-2 (default: 1.6); independent of detection confidence")
     args = parser.parse_args()
+    if (sys.platform == "darwin" and args.backend != "avfoundation") or (sys.platform == "win32" and args.backend == "avfoundation"):
+        parser.error(f"--backend {args.backend} is unavailable on {sys.platform}.")
     if args.camera < 0 or not np.isfinite(args.confidence) or not 0 <= args.confidence <= 1:
         parser.error("--camera must be nonnegative; --confidence must be between 0 and 1.")
     if not np.isfinite(args.seconds) or args.seconds < 0 or (args.headless and args.seconds == 0):

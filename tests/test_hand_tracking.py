@@ -104,7 +104,7 @@ class HandTrackingTests(unittest.TestCase):
         args = SimpleNamespace(model=Path(__file__), hand_model=Path(__file__), control=False,
                                practice=True, sensitivity=1, confidence=.6, warmup=2,
                                camera=0, backend="dshow", headless=True)
-        with patch("webcam_tracker.WindowsKeyboard", side_effect=AssertionError("native input in practice")) as native:
+        with patch("webcam_tracker.native_keyboard", side_effect=AssertionError("native input in practice")) as native:
             with patch("webcam_tracker.Tracker"), patch("webcam_tracker.HandTracker"):
                 with patch("webcam_tracker.Camera", side_effect=CameraStop):
                     with self.assertRaises(CameraStop):

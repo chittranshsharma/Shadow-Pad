@@ -4,12 +4,12 @@
 <p align="center">
   <a href="https://github.com/chittranshsharma/Shadow-Pad/actions/workflows/ci.yml"><img src="https://github.com/chittranshsharma/Shadow-Pad/actions/workflows/ci.yml/badge.svg" alt="Automated checks"></a>
   <img src="https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white" alt="Python 3.14">
-  <img src="https://img.shields.io/badge/Platform-Windows-0078D4" alt="Windows">
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Apple%20Silicon-0078D4" alt="Windows and Apple Silicon macOS">
   <img src="https://img.shields.io/badge/Inference-On%20device-00897B" alt="On-device inference">
   <img src="https://img.shields.io/badge/Status-Prototype-D97706" alt="Prototype status">
 </p>
 
-ShadowPad explores playing a fighting game through body movement and arm gestures using a laptop webcam. Its foundation is a local processing engine: continuous capture, asynchronous pose estimation, confidence-aware tracking, native Windows input, and reproducible performance reports.
+ShadowPad explores playing a fighting game through body movement and arm gestures using a laptop webcam. Its foundation is a local processing engine: continuous capture, asynchronous pose estimation, confidence-aware tracking, guarded desktop input, and reproducible performance reports.
 
 **Current release:** shoulder movement plus an experimental dedicated hand recognizer for forward attacks, a practice window that sends no game keys, and a separate button tester. The button tester and left/right/jump gestures are user-confirmed. After fixing hand assignment and recovery, the user confirmed both hands become ready and drive Square/Triangle separately in practice; that session recorded seven events on each punch counter. Attempt accuracy, kick, idle, and in-game checks remain pending.
 
@@ -24,20 +24,20 @@ ShadowPad explores playing a fighting game through body movement and arm gesture
 - **Calibrated movement:** mirrored left/right lean, upper-body rise to jump, and dip to duck; shoulder-width normalization and hysteresis reduce dependence on distance and jitter.
 - **Four attack gestures:** closed-fist pushes for Square/Triangle and open-palm pushes for Cross/Circle. Palm expansion or deliberate projected hand travel, stable hand shape, guard, motion progression, and return checks gate each short button press.
 - **Stable hand identity:** body wrists and recent hand tracks assign left/right; ambiguous per-frame handedness labels do not directly choose buttons.
-- **Practice first:** Test Gestures.cmd shows the detected hand shape, guard state, palm-size ratio, and attack counts through a keyboard adapter that cannot send native inputs.
+- **Practice first:** `--practice` shows the detected hand shape, guard state, palm-size ratio, and attack counts through a keyboard adapter that cannot send native inputs.
 - **Performance instrumentation:** timing percentiles, warmup exclusion, bounded sample retention, throughput, and aggregate JSON reports.
-- **Automated verification:** camera-independent tests and a Windows GitHub Actions workflow.
+- **Automated verification:** camera-independent tests on Windows and Apple Silicon macOS CI.
 
 ## Tech stack
 
 | Layer | Technology | Responsibility |
 |---|---|---|
 | Runtime | Python 3.14, standard library | Concurrency, CLI, configuration, reporting, tests |
-| Camera and preview | OpenCV contrib | Windows capture backends, full-frame display, image conversion |
+| Camera and preview | OpenCV contrib | Windows and macOS capture backends, full-frame display, image conversion |
 | AI / computer vision | MediaPipe Tasks, Pose Landmarker + Gesture Recognizer | Pretrained body landmarks, hand landmarks, fist/palm classification |
 | Image data | NumPy | Frame arrays and preview operations |
 | Tracking engine | Confidence checks, monotonic timestamps | Joint reliability and stale-result rejection |
-| Input adapter | `ctypes`, Win32 `SendInput` | Scan-code key-down/key-up and process-focus checks |
+| Input adapter | Win32 `SendInput` or macOS Quartz | Key-down/key-up and PPSSPP focus checks |
 | Observability | Thread-safe bounded timing windows | P50/P95/P99, throughput, quality counts, JSON export |
 | Verification | `unittest`, GitHub Actions | Deterministic behavior checks without a camera or game |
 
@@ -65,7 +65,7 @@ flowchart LR
     Metrics --> Report[Aggregate JSON report]
     CLI[Explicitly armed input test] --> Bindings[Read PPSSPP bindings]
     Bindings --> Guard[Foreground and hold guards]
-    Guard --> Native[Windows scan-code adapter]
+    Guard --> Native[Windows or macOS keyboard adapter]
     Native --> Emulator[PPSSPP]
     Quality --> Movement[Calibrated shoulder movement]
     Movement --> Guard
@@ -75,7 +75,7 @@ Camera-only mode, gesture practice, game control, and input tests have separate 
 
 ## Quick start
 
-Requirements: Windows, a compatible **64-bit Python 3.14** installation, a webcam, and internet access for initial dependency/model downloads. The pinned package set has been verified locally on Python 3.14.8. PPSSPP and game files are not bundled.
+Requirements: Windows or an **Apple Silicon Mac with macOS 13+**, Python 3.14, a webcam, and internet access for initial dependency/model downloads. The Windows package set has been verified locally on Python 3.14.8; Mac dependencies and behavior run in CI, while physical Mac gameplay still needs a user check. The pinned MediaPipe build has an Apple Silicon wheel; Intel Macs are not covered. PPSSPP and game files are not bundled.
 
 ```powershell
 git clone https://github.com/chittranshsharma/Shadow-Pad.git
@@ -84,6 +84,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
 Setup creates `.venv`, installs the pinned direct dependencies, and downloads the official Full pose and Gesture Recognizer models with fixed SHA-256 checks. The PowerShell flag applies to that invocation; it does not change the saved system policy. Existing installations can add the hand model with `download_model.py --variant hands`; both gesture launchers also download it if missing.
+
+On an Apple Silicon Mac, install Python 3.14, PPSSPP, and use Terminal:
+
+```sh
+git clone https://github.com/chittranshsharma/Shadow-Pad.git
+cd Shadow-Pad
+sh setup-mac.sh
+.venv/bin/python webcam_tracker.py --practice
+```
+
+Allow Terminal/Python camera access when macOS asks. To send game keys, grant that same Terminal/Python app Accessibility access in System Settings → Privacy & Security → Accessibility, then restart Terminal and ShadowPad. Open Tekken in PPSSPP first. Inspect the saved bindings with `.venv/bin/python input_check.py`; the default Mac path is `~/.config/ppsspp/PSP/SYSTEM/controls.ini`. For a custom PPSSPP memory stick, pass `--controls /path/to/controls.ini` to both the checker and controller. The Mac adapter uses US keyboard positions for letter keys, so verify the mappings on non-US layouts.
+
+Mac commands matching the Windows launchers:
+
+```sh
+.venv/bin/python webcam_tracker.py                 # camera only
+.venv/bin/python webcam_tracker.py --practice      # no desktop keys
+.venv/bin/python input_check.py --button Left --run # one bounded input
+.venv/bin/python webcam_tracker.py --control       # game control, starts paused
+```
+
+In game control, press **C** in the preview to calibrate, then **A** and click PPSSPP within five seconds. **Control+Option+P** pauses or rearms while PPSSPP is focused. The Mac camera uses AVFoundation; close other apps using the camera if capture fails.
 
 ### 1. Check the camera
 
@@ -234,7 +256,7 @@ See [the benchmark protocol](docs/PERFORMANCE.md) for repeatable comparisons and
 
 Tests cover confidence boundaries, stale results, framing advice, full-frame preview preservation, saved-key mapping, arming/countdown behavior, early release on focus loss, cancellation, uncertain input failure cleanup, percentile math, warmup accounting, bounded memory, concurrency, and report preservation.
 
-CI runs these camera-independent checks on Windows/Python 3.14. It does not exercise a physical webcam, Windows input injection, or Tekken.
+CI runs these camera-independent checks on Windows and macOS with Python 3.14. It does not exercise a physical webcam, desktop input injection, or Tekken.
 
 ## Project layout
 
@@ -252,7 +274,7 @@ download_model.py          Official model download and integrity verification
 setup.ps1                  Local environment setup
 tests/                     Camera-independent automated checks
 docs/                      Architecture and benchmarking methodology
-.github/workflows/ci.yml   Windows automated checks
+.github/workflows/ci.yml   Windows and macOS automated checks
 ```
 
 ## Roadmap
@@ -272,17 +294,17 @@ docs/                      Architecture and benchmarking methodology
 
 ## Troubleshooting and limits
 
-- **Camera unavailable:** close other camera apps; try `--camera 1` or `--backend msmf`. Check Windows camera permission yourself if required.
+- **Camera unavailable:** close other camera apps and try `--camera 1`. On Windows, `--backend msmf` is an alternative; on Mac, allow camera access for Terminal/Python.
 - **Elbows unreliable:** bring more of the torso into the image and avoid table/body occlusion. The Full model is available, but its elbow improvement in the development setup is not established.
 - **Attacks do not fire:** use Test Gestures.cmd and inspect the state. Fully show a fist/palm until **ready**, then push and retract. If hands are tracked but reach stays below 1, try **]**. If a hand is absent or its identity is unresolved, sensitivity is not the remedy; the status explains which stage is blocked. A brief dropout clears inputs and reacquires a stable nearby guard. H resets guards after a larger posture change.
 - **Unexpected attacks:** practice at rest and inspect which counter changes. Classification and geometric motion remain experimental; no measured live accuracy or false-activation rate is claimed. Report the hand label, state, and counter affected so the failure can be reproduced.
 - **A brief tracking gap:** held inputs release immediately and resume after two good shoulder results. Keep PPSSPP focused; changing focus still pauses the controller.
 - **Input cancelled:** PPSSPP must be foreground at key-down and throughout the short hold.
-- **Input rejected:** check equal app privilege levels and the actual configured keyboard bindings.
+- **Input rejected:** check the actual configured bindings. On Windows, run both apps at the same privilege level. On Mac, grant Accessibility access to Terminal/Python and restart it.
 - **Unexpected OpenCV errors:** install only `opencv-contrib-python` in the environment; do not also install `opencv-python` or a headless build.
 - **No timing percentiles:** run longer than the configured warmup.
 
-Input cleanup handles normal exits, exceptions, cancellation, and detected focus loss. `SendInput` uses global keyboard state: cleanup key-up events are global, a very small focus-check/input race is possible, and a forced process kill cannot guarantee release.
+Input cleanup handles normal exits, exceptions, cancellation, and detected focus loss. Desktop keyboard state is global: cleanup key-up events are global, a very small focus-check/input race is possible, and a forced process kill cannot guarantee release.
 
 ## Privacy and attribution
 

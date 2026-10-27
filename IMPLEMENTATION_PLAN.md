@@ -6,6 +6,8 @@ Build an on-device Windows webcam controller for PPSSPP with upper-body movement
 
 ## Implemented
 
+- Apple Silicon macOS path: AVFoundation camera default, PPSSPP's macOS memory-stick binding path, Quartz key events with Accessibility and foreground-app checks, Mac setup script, and Windows/macOS CI. The Mac input adapter shares the existing paused calibration and gesture controller. Intel Mac wheels are unavailable for the pinned MediaPipe version.
+
 - Project-local Python environment; pinned direct dependencies and verified official model downloads.
 - Single-slot threaded capture and asynchronous MediaPipe Full inference, with Lite available for comparison.
 - Mirrored full-frame preview; optional diagnostics; confidence and stale-result handling.
@@ -24,6 +26,8 @@ Build an on-device Windows webcam controller for PPSSPP with upper-body movement
 - Public README, architecture documentation, repeatable benchmark protocol, and Windows CI workflow.
 
 ## Verification
+
+- Windows local suite passes 108 camera-independent tests after adding Mac adapter focus, key translation, release, pause shortcut, and config-path checks. macOS CI and physical Mac PPSSPP gameplay are separate remaining checks; no Mac webcam or visible game response was observed locally.
 
 - Current responsiveness revision: 1.6x default reach, 80 ms attack pulses, 180 ms cooldown, shorter confirmed return and guard learning, two-observation shape switching, relaxed-palm geometry, and hand-model acquisition defaults of 0.5. Stable-position guards with noisy dimensions use projected travel only. Pose reliability remains 0.6. The user reported missed palms and difficult readiness in the earlier faster session; current kick/idle/game acceptance remains pending.
 - In the revised practice session, both kick counters produced events. The user said it was fine for now and requested moving to Tekken. This is provisional usability feedback, not a labeled kick accuracy or idle result. Practice was closed and the real controller launched paused using the existing eight PPSSPP bindings. Visible gameplay and the controlled idle check remain unverified.
