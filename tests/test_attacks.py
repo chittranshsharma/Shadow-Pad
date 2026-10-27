@@ -48,6 +48,36 @@ class AttackTests(unittest.TestCase):
                     self.assertEqual(self.feed(hand(1, side, gesture)), set())
                 self.assertEqual(self.stroke(side, gesture), [action])
 
+    def test_projected_punch_without_scale_change_fires_once(self):
+        self.guard()
+        events = []
+        for y in (.48, .45, .41, .38, .38, .38):
+            events.extend(self.feed(hand(y=y)))
+        self.assertEqual(events, ["Square"])
+        for _ in range(30):
+            self.assertEqual(self.feed(hand(y=.38)), set())
+        for _ in range(12):
+            self.assertEqual(self.feed(hand()), set())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
+    def test_sideways_open_palm_push_maps_only_to_kick(self):
+        self.guard(gesture="Open_Palm")
+        events = []
+        for x in (.32, .35, .39, .44, .46, .46):
+            events.extend(self.feed(hand(gesture="Open_Palm", x=x)))
+        self.assertEqual(events, ["Cross"])
+
+    def test_lowering_a_hand_with_scale_growth_does_not_fire(self):
+        self.guard()
+        for scale, y in ((1.1, .56), (1.2, .61), (1.4, .7), (1.6, .8), (1.6, .8)):
+            self.assertEqual(self.feed(hand(scale, y=y)), set())
+
+    def test_single_frame_position_noise_does_not_fire(self):
+        self.guard()
+        self.assertEqual(self.feed(hand(y=.38)), set())
+        for _ in range(6):
+            self.assertEqual(self.feed(hand()), set())
+
     def test_idle_jitter_does_not_fire_over_thirty_seconds(self):
         self.guard()
         rng = random.Random(7)
@@ -77,6 +107,11 @@ class AttackTests(unittest.TestCase):
     def test_guard_has_no_chest_height_box(self):
         for _ in range(14):
             self.assertEqual(self.feed(hand(y=.9)), set())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
+    def test_geometry_fist_can_learn_guard_without_classifier_score(self):
+        for _ in range(14):
+            self.assertEqual(self.feed(hand(score=None, source="geometry")), set())
         self.assertEqual(self.engine.hands["Left"].phase, "ready")
 
     def test_one_frame_scale_spike_does_not_fire(self):

@@ -14,7 +14,9 @@ Build an on-device Windows webcam controller for PPSSPP with upper-body movement
 - Upper-body rise for a one-shot Up hold; dip for a sustained Down hold. Movement does not require reliable elbows.
 - Replaced unreliable pose-wrist attack heuristics with the official Gesture Recognizer hand model. Closed-fist forward pushes map to Square/Triangle; open-palm forward pushes map to Cross/Circle. Median filtering, stable guards, palm expansion, motion timing, torso-scale rejection, and retraction gate each event.
 - Test Gestures.cmd uses the same detector with a keyboard adapter that has no native API calls. The preview shows actual hand class/confidence, guard state, expansion ratio, and per-action counts. Game mode keeps expanded diagnostics behind Tab.
-- Live practice exposed a visible fist getting stuck before ready. Guard learning now uses five-sample median confidence and robust stability checks, preserves observations across brief uncertain/body gaps, accepts any fully visible hand position, and displays the specific blocking reason. A 100% classifier score is not required.
+- Live practice exposed a visible fist getting stuck before ready. Guard learning now uses temporal shape support and robust stability checks, preserves observations across brief uncertain/body gaps, accepts any fully visible hand position, and displays the specific blocking reason. A 100% classifier score is not required.
+- A user-provided screenshot exposed two further issues: practice was calibrated but not started, and the canned model returned None for a boxing fist. Practice now starts automatically after C calibration. A finger-curl fallback recognized a fist in that screenshot from the hand model's folded-finger geometry, without treating the None score as fist confidence. The screenshot remains private and is not included in the repository.
+- The user confirmed identification/ready now works, but palm-size-only punches did not increment counters. Projected upward/sideways travel was added alongside expansion, with filtered positions, motion timing, endpoint confirmation, and a close return-to-guard check. The user then confirmed a punch increments once; the local practice summary recorded exactly one Square event. Other-hand punches, palm/kick inputs, idle false activations, and the new detector's in-game behavior still need live acceptance.
 - Paused startup, explicit arming, modifier suppression, focus checks, immediate release on tracking gaps with automatic two-result recovery, and multi-key release handling.
 - Bounded callback-based timing statistics, warmup exclusion, P50/P95/P99, throughput/quality counters, environment/model identifiers, and JSON export.
 - Camera-only headless runs avoid display-only mirroring/copies; hand inference requires mirrored input even in headless practice. No speedup percentage is claimed without equivalent benchmark runs.
@@ -33,7 +35,7 @@ Build an on-device Windows webcam controller for PPSSPP with upper-body movement
 
 ## Immediate acceptance steps
 
-1. Start Test Gestures.cmd, calibrate shoulders with C, and start practice with A. Confirm actual fist/palm labels and each hand's ready state.
+1. Start Test Gestures.cmd and calibrate shoulders with C; practice starts automatically. Confirm actual fist/palm labels and each hand's ready state.
 2. At rest for 20 seconds, confirm counters do not increase. Perform ten forward closed-fist pushes and ten open-palm pushes per hand, retracting after each; count hits, misses, and wrong actions.
 3. Correct remaining live failures using the hand label, guard state, size ratio, and affected action as evidence. H relearns hand guards without recalibrating shoulders.
 4. Open Tekken Practice and Play ShadowPad.cmd. Calibrate with C, press A, and focus PPSSPP within five seconds. Verify the same four gestures alongside movement.

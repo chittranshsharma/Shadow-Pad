@@ -1,4 +1,4 @@
-"""Forward attacks from measured palm expansion, never inferred pose depth."""
+"""Shape-gated attacks from measured palm expansion and projected hand travel."""
 
 from collections import deque
 from dataclasses import dataclass, field
@@ -10,18 +10,22 @@ from statistics import median
 class HandObservation:
     side: str
     gesture: str
-    score: float
+    score: float | None
     x: float
     y: float
     width: float
     length: float
+    source: str = "model"
 
     def valid(self):
-        values = (self.score, self.x, self.y, self.width, self.length)
+        values = (self.x, self.y, self.width, self.length)
+        supported = ((self.source == "geometry" and self.score is None)
+                     or (self.source == "model" and self.score is not None
+                         and math.isfinite(self.score) and .5 <= self.score <= 1))
         return (self.side in ("Left", "Right")
                 and self.gesture in ("Closed_Fist", "Open_Palm")
                 and all(math.isfinite(value) for value in values)
-                and .5 <= self.score <= 1
+                and supported
                 and 0 <= self.x <= 1 and 0 <= self.y <= 1
                 and .018 <= self.width <= .6 and .018 <= self.length <= .6)
 
@@ -35,8 +39,10 @@ class HandState:
     anchor: tuple | None = None
     last_time: float | None = None
     last_position: tuple | None = None
-    previous_ratio: float = 1.0
     ratio: float = 1.0
+    progress: float = 0.0
+    previous_progress: float = 0.0
+    confirmations: int = 0
     started: float = 0.0
     growth_steps: int = 0
     returned_at: float | None = None
@@ -53,6 +59,8 @@ class HandState:
             self.last_position = None
         self.returned_at = None
         self.growth_steps = 0
+        self.confirmations = 0
+        self.progress = self.previous_progress = 0
         self.reason = "retract hand" if self.anchor else "show fist or palm"
 
 
@@ -100,7 +108,7 @@ class HandAttacks:
                     hand = visible[0]
                     if hand.gesture not in ("Closed_Fist", "Open_Palm"):
                         state.reason = "make fist or open palm"
-                    elif hand.score < .5:
+                    elif hand.score is not None and hand.score < .5:
                         state.reason = f"shape confidence {hand.score:.0%}"
                     else:
                         state.reason = "move hand closer / fully in view"
@@ -124,21 +132,23 @@ class HandAttacks:
             if dt > .3 or math.dist(position, state.last_position) > max(.45, 5 * dt):
                 state.interrupt()
         state.last_time, state.last_position = now, position
-        state.recent.append((hand.width, hand.length))
+        state.recent.append((hand.width, hand.length, *position))
         if len(state.recent) < 3:
             state.reason = "checking hand"
             return False
         width = median(value[0] for value in state.recent)
         length = median(value[1] for value in state.recent)
+        position = (median(value[2] for value in state.recent), median(value[3] for value in state.recent))
         if state.anchor is None:
             state.phase = "hold guard"
-            state.samples.append((now, width, length, *position, bw, hand.score))
+            shape_supported = hand.source == "geometry" or hand.score >= .6
+            state.samples.append((now, width, length, *position, bw, shape_supported))
             while state.samples and now - state.samples[0][0] > .8:
                 state.samples.popleft()
             state.reason = f"hold still: {min(len(state.samples), 5)}/5"
             if len(state.samples) < 5 or now - state.samples[0][0] < .3:
                 return False
-            if median(sample[6] for sample in state.samples) < .6:
+            if sum(sample[6] for sample in state.samples) / len(state.samples) < .6:
                 state.reason = "shape uncertain: turn fist/palm toward lens"
                 return False
             for index in (1, 2):
@@ -157,7 +167,7 @@ class HandAttacks:
             state.anchor = tuple(median(s[i] for s in state.samples) for i in range(1, 6))
             state.phase = "ready"
             state.reason = "ready"
-            state.previous_ratio = state.ratio = 1
+            state.ratio = 1
             return False
 
         aw, al, ax, ay, abw = state.anchor
@@ -168,9 +178,14 @@ class HandAttacks:
             return False
         rw, rl = width / aw, length / al
         ratio = math.sqrt(rw * rl)
-        previous = state.previous_ratio
-        state.previous_ratio = state.ratio = ratio
-        near_guard = rw < 1.13 and rl < 1.13 and math.dist(position, (ax, ay)) < .3
+        state.ratio = ratio
+        dx, dy = position[0] - ax, position[1] - ay
+        expansion = ((ratio - 1) / .35 if min(rw, rl) >= 1.08 and .75 <= rw / rl <= 1.33 and dy <= .18 else 0)
+        travel = max(-dy / .22, abs(dx) / .30 if dy <= .12 else 0)
+        progress = max(0, expansion, travel)
+        previous = state.previous_progress
+        state.progress = state.previous_progress = progress
+        near_guard = rw < 1.13 and rl < 1.13 and math.dist(position, (ax, ay)) < .12
         if state.phase == "return":
             state.reason = "retract hand"
             if near_guard and now >= state.cooldown_until:
@@ -182,27 +197,29 @@ class HandAttacks:
                     state.anchor = (width, length, *position, bw)
                     state.returned_at = None
                     state.growth_steps = 0
+                    state.confirmations = 0
             else:
                 state.returned_at = None
             return False
-        if state.phase == "ready" and ratio > 1.10:
+        if state.phase == "ready" and progress > .3:
             state.phase = "extending"
             state.reason = "push forward"
             state.started = now
-            state.growth_steps = 1 if ratio - previous > .035 else 0
+            state.growth_steps = 1 if progress - previous > .12 else 0
+            state.confirmations = int(progress >= 1)
             return False
         if state.phase == "extending":
-            if ratio - previous > .035:
+            if progress - previous > .12:
                 state.growth_steps += 1
-            if ratio < 1.06:
+            state.confirmations = state.confirmations + 1 if progress >= 1 else 0
+            if progress < .18:
                 state.phase = "ready"
                 state.reason = "ready"
                 state.growth_steps = 0
-            elif now - state.started > .55 or ratio > 2.4:
+            elif now - state.started > .8 or ratio > 2.4:
                 state.phase = "return"
                 state.reason = "retract hand"
-            elif (ratio >= 1.35 and min(rw, rl) >= 1.18 and .75 <= rw / rl <= 1.33
-                  and state.growth_steps >= 2):
+            elif progress >= 1 and (state.growth_steps >= 2 or state.confirmations >= 2):
                 state.phase = "return"
                 state.reason = "attack detected: retract"
                 state.cooldown_until = now + .3

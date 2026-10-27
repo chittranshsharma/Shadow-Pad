@@ -3,6 +3,7 @@ import unittest
 
 from movement import Movement, MovementController, Neutral
 from attacks import HandObservation
+from ppsspp_input import PracticeKeyboard
 
 
 def shoulders(x=.5, y=.4):
@@ -138,6 +139,14 @@ class ControllerTests(unittest.TestCase):
         self.keyboard.toggle = False
         self.keyboard.modifiers = False
         self.controller.tick(3.02)
+
+    def test_practice_starts_after_calibration_but_game_requires_arming(self):
+        for keyboard, should_arm in ((PracticeKeyboard(), True), (FakeKeyboard(), False)):
+            controller = MovementController(keyboard, self.controller.bindings)
+            controller.calibrate()
+            for index in range(11):
+                controller.on_pose(shoulders(), .01, index * .21)
+            self.assertEqual(controller.armed, should_arm)
 
     def test_starts_paused_and_requires_emulator_focus_to_arm(self):
         self.assertFalse(self.controller.armed)

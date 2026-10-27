@@ -186,6 +186,7 @@ class MovementController:
         self.recovering = 0
 
     def on_pose(self, points, age, now, confidence=.6):
+        was_calibrating = self.movement.calibrating
         desired, valid = self.movement.update(points, age, now, confidence)
         if not valid:
             self.last_pose = None
@@ -203,6 +204,8 @@ class MovementController:
                      (points[11].y + points[12].y) / 2,
                      math.hypot(points[11].x - points[12].x, points[11].y - points[12].y))
         self.body_history.append((self.last_pose, self.body))
+        if self.practice and was_calibrating and not self.movement.calibrating:
+            self._arm(now)
         if self.armed and self.recovering:
             self.recovering += 1
             if self.recovering < 3:
@@ -215,7 +218,7 @@ class MovementController:
             self.status = "Calibrating: sit comfortably and hold still for 2 seconds"
         elif self.movement.neutral is not None and not self.armed and self.arm_at is None:
             if self.status.startswith("Calibrating:"):
-                self.status = ("Calibrated | A starts practice" if self.practice
+                self.status = ("Calibrated | A resumes practice" if self.practice
                                else "Calibrated | press A here, then click PPSSPP")
         self.desired = desired if self.armed else set()
 

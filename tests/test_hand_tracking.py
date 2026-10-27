@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from hand_tracking import extract_hands
+from hand_tracking import extract_hands, finger_shape
 from movement import MovementController
 from ppsspp_input import CONTROL_ACTIONS, PracticeKeyboard
 from webcam_tracker import control_overlay, run
@@ -22,7 +22,37 @@ def result(gesture="Closed_Fist", score=.95):
                            gestures=[[SimpleNamespace(category_name=gesture, score=score)]])
 
 
+def finger_points(extended=()):
+    points = [SimpleNamespace(x=0., y=0., z=0.) for _ in range(21)]
+    for number, (mcp, pip, tip) in enumerate(((5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20))):
+        x = -.03 + number * .02
+        points[mcp] = SimpleNamespace(x=x, y=.04, z=0.)
+        points[pip] = SimpleNamespace(x=x, y=.065, z=0.)
+        points[tip] = SimpleNamespace(x=x, y=.11 if number in extended else .025,
+                                      z=0. if number in extended else -.01)
+    return points
+
+
 class HandTrackingTests(unittest.TestCase):
+    def test_closed_fist_geometry_is_rotation_independent(self):
+        points = finger_points()
+        self.assertEqual(finger_shape(points), "Closed_Fist")
+        rotated = [SimpleNamespace(x=p.z, y=p.x, z=p.y) for p in points]
+        self.assertEqual(finger_shape(rotated), "Closed_Fist")
+
+    def test_extended_palm_and_pointing_hand_are_distinguished(self):
+        self.assertEqual(finger_shape(finger_points(range(4))), "Open_Palm")
+        self.assertIsNone(finger_shape(finger_points((0,))))
+
+    def test_none_label_can_use_definite_finger_curl_without_fake_score(self):
+        detected = result("None", .95)
+        detected.hand_world_landmarks = [finger_points()]
+        hands, _ = extract_hands(detected, .75)
+        self.assertEqual(hands[0].gesture, "Closed_Fist")
+        self.assertEqual(hands[0].source, "geometry")
+        self.assertIsNone(hands[0].score)
+        self.assertTrue(hands[0].valid())
+
     def test_extracts_palm_geometry_with_pixel_aspect_correction(self):
         observations, outlines = extract_hands(result(), .75)
         self.assertEqual(len(observations), 1)

@@ -15,6 +15,33 @@ from performance import TimingWindow
 HAND_MODEL = Path(__file__).resolve().parent / "models" / "gesture_recognizer.task"
 
 
+def finger_shape(points):
+    """Recognize folded/extended fingers independent of hand rotation."""
+    if len(points) != 21:
+        return None
+    xyz = [(p.x, p.y, p.z) for p in points]
+    if not all(math.isfinite(value) for point in xyz for value in point):
+        return None
+    folded = extended = 0
+    for mcp, pip, tip in ((5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20)):
+        first = tuple(a - b for a, b in zip(xyz[mcp], xyz[pip]))
+        second = tuple(a - b for a, b in zip(xyz[tip], xyz[pip]))
+        denominator = math.dist(first, (0, 0, 0)) * math.dist(second, (0, 0, 0))
+        palm_distance = math.dist(xyz[mcp], xyz[0])
+        if denominator < 1e-10 or palm_distance < 1e-6:
+            return None
+        cosine = max(-1, min(1, sum(a*b for a, b in zip(first, second)) / denominator))
+        angle = math.degrees(math.acos(cosine))
+        reach = math.dist(xyz[tip], xyz[0]) / palm_distance
+        folded += angle < 115 and reach < 1.05
+        extended += angle > 150 and reach > 1.35
+    if folded >= 3 and extended == 0:
+        return "Closed_Fist"
+    if extended >= 3 and folded == 0:
+        return "Open_Palm"
+    return None
+
+
 def extract_hands(result, aspect):
     observations, outlines = [], []
     for index, points in enumerate(result.hand_landmarks):
@@ -24,6 +51,11 @@ def extract_hands(result, aspect):
             continue
         handedness = max(result.handedness[index], key=lambda category: category.score)
         gesture = max(result.gestures[index], key=lambda category: category.score)
+        shape, score, source = gesture.category_name, gesture.score, "model"
+        world = getattr(result, "hand_world_landmarks", [])
+        geometry = finger_shape(world[index]) if index < len(world) else None
+        if geometry and (shape == "None" or (shape == geometry and score < .6)):
+            shape, score, source = geometry, None, "geometry"
         if handedness.category_name not in ("Left", "Right") or handedness.score < .7:
             continue
         if not all(math.isfinite(p.x) and math.isfinite(p.y) and 0 <= p.x <= 1 and 0 <= p.y <= 1 for p in points):
@@ -31,9 +63,9 @@ def extract_hands(result, aspect):
         palm = [points[i] for i in (0, 5, 9, 13, 17)]
         def distance(a, b):
             return math.hypot(points[a].x - points[b].x, (points[a].y - points[b].y) * aspect)
-        observation = HandObservation(handedness.category_name, gesture.category_name, gesture.score,
+        observation = HandObservation(handedness.category_name, shape, score,
                                       sum(p.x for p in palm) / 5, sum(p.y for p in palm) / 5,
-                                      distance(5, 17), distance(0, 9))
+                                      distance(5, 17), distance(0, 9), source)
         observations.append(observation)
         outlines.append((observation, tuple((p.x, p.y) for p in palm)))
     return observations, outlines
