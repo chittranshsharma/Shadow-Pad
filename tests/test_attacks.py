@@ -79,11 +79,14 @@ class AttackTests(unittest.TestCase):
             self.assertEqual(self.feed(hand()), set())
 
     def test_idle_jitter_does_not_fire_over_thirty_seconds(self):
-        self.guard()
-        rng = random.Random(7)
-        for _ in range(600):
-            self.assertEqual(self.feed(hand(1 + rng.uniform(-.06, .06),
-                                            x=.3 + rng.uniform(-.008, .008))), set())
+        for sensitivity in (1, 1.25, 2):
+            with self.subTest(sensitivity=sensitivity):
+                self.engine = HandAttacks(sensitivity)
+                self.guard()
+                rng = random.Random(7)
+                for _ in range(600):
+                    self.assertEqual(self.feed(hand(1 + rng.uniform(-.06, .06),
+                                                    x=.3 + rng.uniform(-.008, .008))), set())
 
     def test_consistent_sixty_percent_fist_can_learn_guard(self):
         for index in range(20):
@@ -154,6 +157,40 @@ class AttackTests(unittest.TestCase):
         for _ in range(12):
             self.feed(hand())
         self.assertEqual(self.stroke(), ["Square"])
+
+    def test_small_posture_shift_after_dropout_relearns_without_manual_reset(self):
+        self.guard()
+        self.feed()
+        for _ in range(18):
+            self.assertEqual(self.feed(hand(x=.35)), set())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
+    def test_guard_learning_and_recovery_are_independent_of_high_frame_rate(self):
+        for _ in range(90):
+            self.assertEqual(self.feed(hand(), dt=1/60), set())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+        self.feed(dt=1/60)
+        for _ in range(90):
+            self.assertEqual(self.feed(hand(x=.35), dt=1/60), set())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
+    def test_attack_sensitivity_reduces_reach_without_repeating_held_strike(self):
+        self.engine = HandAttacks(1.5)
+        self.guard()
+        events = []
+        for y in (.49, .47, .45, .44, .44, .44):
+            events.extend(self.feed(hand(y=y)))
+        self.assertEqual(events, ["Square"])
+        for _ in range(30):
+            self.assertEqual(self.feed(hand(y=.44)), set())
+
+    def test_sensitivity_changes_relearn_guard_and_validate_range(self):
+        self.guard()
+        self.engine.set_sensitivity(1.3)
+        self.assertIsNone(self.engine.hands["Left"].anchor)
+        for value in (0, 3, float("nan")):
+            with self.assertRaises(ValueError):
+                self.engine.set_sensitivity(value)
 
     def test_leaning_towards_camera_does_not_count_as_hand_push(self):
         self.guard()

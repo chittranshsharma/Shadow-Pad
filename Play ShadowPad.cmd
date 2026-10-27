@@ -22,6 +22,7 @@ echo 3. Lean left/right, rise to jump, dip to duck.
 echo 4. Hold a closed fist fully in view until READY, then punch straight forward.
 echo    Left/right closed fist = Square/Triangle. Open-palm forward push = Cross/Circle.
 echo    Return the hand after each attack. H resets guards; Tab shows diagnostics.
+echo    Attack reach defaults to 1.25x; [ and ] adjust it in the preview.
 echo    Test Gestures.cmd lets you check detections without sending game keys.
 echo Ctrl+Alt+P pauses or arms directly. Focus loss pauses and releases inputs.
 echo Q/Esc in the preview exits.

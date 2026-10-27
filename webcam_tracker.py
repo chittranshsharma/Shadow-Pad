@@ -17,6 +17,7 @@ from tracking_quality import CONNECTIONS, JOINTS, STALE_SECONDS, assess, framing
 from performance import PipelineMetrics, environment, write_report
 from movement import MovementController
 from hand_tracking import HAND_MODEL, HandTracker
+from hand_identity import body_references
 from ppsspp_input import CONTROL_ACTIONS, PracticeKeyboard, WindowsKeyboard, default_controls, read_bindings
 
 
@@ -205,8 +206,8 @@ def control_overlay(canvas, controller, outlines, practice=False, details=False)
     for observation, outline in outlines:
         polygon = np.array([(int(x * canvas.shape[1]), int(y * canvas.shape[0]))
                             for x, y in outline], dtype=np.int32)
-        state = controller.strikes.hands[observation.side]
-        color = GREEN if state.phase == "ready" else AMBER
+        state = controller.strikes.hands.get(observation.side)
+        color = GREEN if state and state.phase == "ready" else AMBER
         cv2.polylines(canvas, [polygon], True, color, 2, cv2.LINE_AA)
         x, y = map(int, polygon[1])
         evidence = ("finger curl" if observation.source == "geometry"
@@ -223,7 +224,7 @@ def control_overlay(canvas, controller, outlines, practice=False, details=False)
             status = f"{side}: {state.phase} | {state.reason} | reach {state.progress:.1f}/1"
             put(canvas, status, (12, canvas.shape[0] - 56 + row * 22), scale=.4)
         counts = "  ".join(f"{action} {count}" for action, count in controller.attack_counts.items())
-        keys = "C: start  A: pause  H: reset hands" if practice else "C: calibrate  A: arm  H: reset hands"
+        keys = f"atk {controller.strikes.sensitivity:.1f}x [ ]  C: start  A: pause  H: reset" if practice else "C: calibrate  A: arm  H: reset"
         put(canvas, counts + "   " + keys, (12, canvas.shape[0] - 12), scale=.38)
     return canvas
 
@@ -246,6 +247,8 @@ def run(args):
     last_sequence = -1
     last_hand_frame = last_hand_result = -1
     last_report = 0.0
+    last_practice_report = 0.0
+    last_detection_summary = {}
     preview_opened = False
     details = False
     fullscreen = False
@@ -260,7 +263,7 @@ def run(args):
             bindings = ({action: (index + 1, action) for index, action in enumerate(CONTROL_ACTIONS)}
                         if practice else read_bindings(args.controls, CONTROL_ACTIONS))
             controller = MovementController(PracticeKeyboard() if practice else WindowsKeyboard(),
-                                            bindings, args.sensitivity)
+                                            bindings, args.sensitivity, getattr(args, "attack_sensitivity", 1.25))
             hand_tracker = HandTracker(hand_model.resolve())
         tracker = Tracker(args.model.resolve(), args.confidence, args.warmup)
         camera = Camera(args.camera, args.backend)
@@ -286,9 +289,6 @@ def run(args):
             if sequence != last_sequence and frame_ms > last_frame_ms:
                 if tracker.submit(raw, frame_ms):
                     last_sequence, last_frame_ms = sequence, frame_ms
-            if hand_tracker and frame_ms > last_hand_frame:
-                if hand_tracker.submit(raw, frame_ms):
-                    last_hand_frame = frame_ms
 
             snapshot = tracker.snapshot()
             landmarks = None
@@ -312,18 +312,30 @@ def run(args):
                         controller.on_pose(landmarks, age, time.monotonic(), args.confidence)
             hand_outlines = []
             if hand_tracker:
+                if frame_ms > last_hand_frame:
+                    references = body_references(landmarks, age, args.confidence)
+                    if hand_tracker.submit(raw, frame_ms, references):
+                        last_hand_frame = frame_ms
                 hand_snapshot = hand_tracker.snapshot()
                 if hand_snapshot is not None:
-                    hand_ms, observations, outlines, hand_frame = hand_snapshot
+                    hand_ms, observations, outlines, hand_frame, diagnostics = hand_snapshot
+                    last_detection_summary = diagnostics
                     hand_age = time.monotonic() - hand_ms / 1000
                     if hand_age <= .3:
                         display_frame = hand_frame
                         hand_outlines = outlines
                     if hand_ms != last_hand_result:
-                        controller.on_hands(observations, hand_ms / 1000, time.monotonic())
+                        controller.on_hands(observations, hand_ms / 1000, time.monotonic(), diagnostics)
                         last_hand_result = hand_ms
             if controller:
                 controller.tick(time.monotonic())
+            if practice and now - last_practice_report >= 2:
+                print(json.dumps({"practice_seconds": round(now - started, 1),
+                                  "counts": controller.attack_counts,
+                                  "detector": last_detection_summary,
+                                  "hands": {side: {"phase": state.phase, "reason": state.reason}
+                                            for side, state in controller.strikes.hands.items()}}), flush=True)
+                last_practice_report = now
             status, visible = assess(landmarks, age, args.confidence)
             if snapshot is None:
                 status = "WAITING FOR TRACKER"
@@ -359,6 +371,10 @@ def run(args):
                         controller.arm_countdown(time.monotonic(), seconds=1 if practice else 5)
                 if key in (ord("h"), ord("H")) and controller:
                     controller.strikes.reset()
+                    controller.pulses.clear()
+                if key in (ord("["), ord("]")) and controller:
+                    value = controller.strikes.sensitivity + (.1 if key == ord("]") else -.1)
+                    controller.strikes.set_sensitivity(round(min(2, max(.5, value)), 2))
                     controller.pulses.clear()
                 if key in (ord("f"), ord("F")):
                     fullscreen = not fullscreen
@@ -409,6 +425,8 @@ def run(args):
                                      "sha256": hashlib.sha256(hand_model.read_bytes()).hexdigest()}
             summary["practice"] = practice
             summary["recognized_attacks"] = controller.attack_counts
+            summary["attack_sensitivity"] = {"initial": getattr(args, "attack_sensitivity", 1.25),
+                                              "final": controller.strikes.sensitivity}
             hand_tracker = None
         tracker = None
         camera = None
@@ -454,6 +472,8 @@ def arguments():
     mode.add_argument("--practice", action="store_true", help="Test gestures and counters without sending any desktop keys")
     parser.add_argument("--controls", type=Path, default=default_controls(), help="PPSSPP controls.ini path")
     parser.add_argument("--sensitivity", type=float, default=1.0, help="Movement sensitivity, 0.5-2 (higher needs less movement)")
+    parser.add_argument("--attack-sensitivity", type=float, default=1.25,
+                        help="Attack reach sensitivity, 0.5-2 (default: 1.25); independent of detection confidence")
     args = parser.parse_args()
     if args.camera < 0 or not np.isfinite(args.confidence) or not 0 <= args.confidence <= 1:
         parser.error("--camera must be nonnegative; --confidence must be between 0 and 1.")
@@ -467,6 +487,8 @@ def arguments():
         parser.error("--control requires the interactive preview for calibration.")
     if not np.isfinite(args.sensitivity) or not .5 <= args.sensitivity <= 2:
         parser.error("--sensitivity must be between 0.5 and 2.")
+    if not np.isfinite(args.attack_sensitivity) or not .5 <= args.attack_sensitivity <= 2:
+        parser.error("--attack-sensitivity must be between 0.5 and 2.")
     return args
 
 

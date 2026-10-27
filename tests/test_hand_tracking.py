@@ -68,8 +68,23 @@ class HandTrackingTests(unittest.TestCase):
 
     def test_cropped_hands_are_rejected(self):
         cropped = result()
-        cropped.hand_landmarks[0][8].x = 1.1
+        cropped.hand_landmarks[0][0].x = 1.1
         self.assertEqual(extract_hands(cropped, .75), ([], []))
+
+    def test_inferred_fingertip_outside_frame_does_not_drop_visible_palm(self):
+        cropped = result()
+        cropped.hand_landmarks[0][8].x = 1.1
+        hands, _ = extract_hands(cropped, .75)
+        self.assertEqual(len(hands), 1)
+        self.assertTrue(hands[0].valid())
+
+    def test_cropped_fingers_cannot_enable_geometry_fallback(self):
+        cropped = result("None", .95)
+        cropped.hand_world_landmarks = [finger_points()]
+        cropped.hand_landmarks[0][8].x = 1.1
+        hands, _ = extract_hands(cropped, .75)
+        self.assertEqual(hands[0].gesture, "None")
+        self.assertFalse(hands[0].valid())
 
     def test_practice_never_constructs_native_keyboard(self):
         class CameraStop(Exception):

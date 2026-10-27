@@ -11,7 +11,7 @@
 
 ShadowPad explores playing a fighting game through body movement and arm gestures using a laptop webcam. Its foundation is a local processing engine: continuous capture, asynchronous pose estimation, confidence-aware tracking, native Windows input, and reproducible performance reports.
 
-**Current release:** shoulder movement plus an experimental dedicated hand recognizer for forward attacks, a practice window that sends no game keys, and a separate button tester. The button tester and left/right/jump gestures are user-confirmed. The previous wrist-only attack detector was unreliable and has been replaced. A punch has been confirmed to increment once in local practice; the other-hand, kick, idle, and in-game checks remain pending.
+**Current release:** shoulder movement plus an experimental dedicated hand recognizer for forward attacks, a practice window that sends no game keys, and a separate button tester. The button tester and left/right/jump gestures are user-confirmed. After fixing hand assignment and recovery, the user confirmed both hands become ready and drive Square/Triangle separately in practice; that session recorded seven events on each punch counter. Attempt accuracy, kick, idle, and in-game checks remain pending.
 
 ## What works today
 
@@ -23,6 +23,7 @@ ShadowPad explores playing a fighting game through body movement and arm gesture
 - **Native input tester:** reads PPSSPP keyboard bindings, explicitly arms one bounded action, and checks foreground focus.
 - **Calibrated movement:** mirrored left/right lean, upper-body rise to jump, and dip to duck; shoulder-width normalization and hysteresis reduce dependence on distance and jitter.
 - **Four attack gestures:** closed-fist pushes for Square/Triangle and open-palm pushes for Cross/Circle. Palm expansion or deliberate projected hand travel, stable hand shape, guard, motion progression, and return checks gate each short button press.
+- **Stable hand identity:** body wrists and recent hand tracks assign left/right; ambiguous per-frame handedness labels do not directly choose buttons.
 - **Practice first:** Test Gestures.cmd shows the detected hand shape, guard state, palm-size ratio, and attack counts through a keyboard adapter that cannot send native inputs.
 - **Performance instrumentation:** timing percentiles, warmup exclusion, bounded sample retention, throughput, and aggregate JSON reports.
 - **Automated verification:** camera-independent tests and a Windows GitHub Actions workflow.
@@ -54,7 +55,9 @@ flowchart LR
     Capture --> Latest[Latest frame slot]
     Latest --> Pose[Async pose inference]
     Latest --> Hands[Async hand inference]
-    Hands --> Attacks[Shape and palm-expansion checks]
+    Pose --> Identity[Body-guided hand association]
+    Hands --> Identity
+    Identity --> Attacks[Shape and motion checks]
     Attacks --> Guard
     Pose --> Quality[Confidence and freshness checks]
     Quality --> Preview[Full-frame preview]
@@ -151,7 +154,7 @@ Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm
 5. For a kick button, open that hand, hold the palm facing the camera until **ready**, push it straight forward, and retract. The matching Cross/Circle counter should increase once.
 6. Keep hands still for 20 seconds; counters should remain unchanged. Check ten deliberate attempts per action before using game control. Practice results are recognition events, not proof of Tekken response.
 
-The preview shows each hand's shape, its state and blocking reason, and **reach** progress toward the trigger (`0/1` near guard, `1/1` at the motion threshold). Reach is a geometric progress value, not a probability. Model scores are confidence, not measured recognition accuracy, and do not need to reach 100%. The canned model can return `None` for a rotated boxing fist; a definite folded-finger pattern from the hand landmarks can qualify it instead. That route is labeled **finger curl**, without a fabricated probability. Five consistent observations establish the guard. **H** relearns hand guards without recalibrating shoulders; **A** pauses/resumes practice. The left/right labels refer to your anatomical hands, using mirrored hand-model input as in Google's official example. The kick controls are deliberate hand proxies because the laptop view does not include your legs.
+The preview shows each hand's shape, its state and blocking reason, and **reach** progress toward the trigger (`0/1` near guard, `1/1` at the motion threshold). Reach is a geometric progress value, not a probability. Model scores are confidence, not measured recognition accuracy, and do not need to reach 100%. The canned model can return `None` for a rotated boxing fist; a definite folded-finger pattern from the hand landmarks can qualify it instead. That route is labeled **finger curl**, without a fabricated probability. Five consistent observations establish the guard. Left/right identity comes from fresh body wrist references, recent hand tracks, and separated body-side guard positions, rather than trusting each hand classifier label. **H** resets guards if needed; ordinary brief dropouts recover automatically. Green means ready to begin; amber during a strike/return is expected. The kick controls are hand proxies because the laptop view does not include your legs.
 
 ### 4. Play in PPSSPP
 
@@ -181,7 +184,13 @@ For smaller movements, increase sensitivity (allowed range 0.5–2):
 .\.venv\Scripts\python.exe webcam_tracker.py --control --sensitivity 1.5
 ```
 
-Movement sensitivity affects shoulders only. Attacks use a separate detector: a three-result median filters palm dimensions and position; a stable guard establishes scale and location. A strike can qualify through 35% combined palm expansion, an upward displacement of 0.22 shoulder widths, or sideways displacement of 0.30 shoulder widths, within an 800 ms motion window. Progressive motion or repeated endpoint confirmation is required. Lowering a hand does not qualify. Pose depth is unused. One strike sends a 120 ms press and needs a close return to guard plus cooldown before repeating. This is experimental geometry on top of pretrained hand classification, not a trained punch detector.
+Movement sensitivity affects shoulders only. Attack reach has its own **1.25x default**, matching the latest local practice check. Use **]** to increase it or **[** to decrease it in 0.1 steps (range 0.5–2); changing it relearns hand guards. It changes required motion, not detection confidence, and cannot recover an unseen hand.
+
+```powershell
+.\.venv\Scripts\python.exe webcam_tracker.py --practice --attack-sensitivity 1.25
+```
+
+Attacks use a three-result median for palm dimensions and position. At 1x, a strike can qualify through 35% combined palm expansion, 0.22 shoulder widths upward, or 0.30 sideways, within an 800 ms motion window. Reach thresholds are divided by attack sensitivity. Progressive motion or repeated endpoint confirmation is required; lowering a hand does not qualify. One strike sends a 120 ms press and needs return plus cooldown before repeating. A nearby relaxed guard can be relearned after a dropout without requiring the exact old pixel position; extended strikes cannot rearm this way. This remains experimental geometry on pretrained hand tracking.
 
 ## Measure performance
 
@@ -234,6 +243,7 @@ webcam_tracker.py          Capture worker, async inference, preview, report inte
 movement.py                Neutral calibration, movement gestures, continuous-input guards
 attacks.py                 Shape-gated forward motion, guard/strike/return states
 hand_tracking.py           Dedicated local hand model, geometry extraction, async results
+hand_identity.py           Body-wrist association and hand identity continuity
 tracking_quality.py        Confidence/freshness rules and honest tracking labels
 ppsspp_input.py            Binding reader, bounded input state machine, Win32 adapter
 input_check.py             Inspection-only / explicitly armed input-test CLI
@@ -264,7 +274,7 @@ docs/                      Architecture and benchmarking methodology
 
 - **Camera unavailable:** close other camera apps; try `--camera 1` or `--backend msmf`. Check Windows camera permission yourself if required.
 - **Elbows unreliable:** bring more of the torso into the image and avoid table/body occlusion. The Full model is available, but its elbow improvement in the development setup is not established.
-- **Attacks do not fire:** use Test Gestures.cmd and inspect the hand label/state. Show a complete fist/palm near chest height until **ready**, keep its orientation, then push toward the lens and retract. If it remains **return**, move back to guard; H resets hand guards if your posture changed. A hand absent from the image cannot be detected.
+- **Attacks do not fire:** use Test Gestures.cmd and inspect the state. Fully show a fist/palm until **ready**, then push and retract. If hands are tracked but reach stays below 1, try **]**. If a hand is absent or its identity is unresolved, sensitivity is not the remedy; the status explains which stage is blocked. A brief dropout clears inputs and reacquires a stable nearby guard. H resets guards after a larger posture change.
 - **Unexpected attacks:** practice at rest and inspect which counter changes. Classification and geometric motion remain experimental; no measured live accuracy or false-activation rate is claimed. Report the hand label, state, and counter affected so the failure can be reproduced.
 - **A brief tracking gap:** held inputs release immediately and resume after two good shoulder results. Keep PPSSPP focused; changing focus still pauses the controller.
 - **Input cancelled:** PPSSPP must be foreground at key-down and throughout the short hold.

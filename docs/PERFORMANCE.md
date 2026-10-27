@@ -36,6 +36,8 @@ Use `--practice --headless --seconds 60 --report reports/both-models-01.json` to
 - `quality_all_results`: presence and per-joint reliability counts, including warmup. A fast run with missing arms is not automatically better.
 - `hand_pipeline`: hand callback count, results with hand observations, and submission-to-result timings. These samples include hand warmup and finish after landmark extraction in the callback; do not combine them with the pose timing series.
 - `recognized_attacks`: motion events from the hand detector. Counts can be checked against labeled attempts, but do not prove native key delivery or visible game response.
+- `hand_pipeline.detection_counts`: raw hand detections versus assigned identities and filter reasons. These distinguish hand acquisition from motion thresholds; assignment coverage is not gesture accuracy.
+- `attack_sensitivity`: initial/final reach settings. Record changes during an interactive evaluation; compare accuracy only under matched settings.
 
 Compare median and tail latency alongside throughput and tracking coverage. P99 from few samples is weak evidence; include counts, repetitions, model hashes, and hardware in published results.
 

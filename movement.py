@@ -112,7 +112,7 @@ class Movement:
 
 
 class MovementController:
-    def __init__(self, keyboard, bindings, sensitivity=1.0):
+    def __init__(self, keyboard, bindings, sensitivity=1.0, attack_sensitivity=1.25):
         self.keyboard = keyboard
         self.practice = getattr(keyboard, "is_practice", False)
         self.bindings = bindings
@@ -122,7 +122,7 @@ class MovementController:
         if len({binding[0] for binding in bindings.values()}) != len(expected):
             raise ValueError("Control actions must have distinct keyboard bindings.")
         self.movement = Movement(sensitivity)
-        self.strikes = HandAttacks()
+        self.strikes = HandAttacks(attack_sensitivity)
         self.pulses = {}
         self.attack_counts = {action: 0 for action in ("Square", "Triangle", "Cross", "Circle")}
         self.body = None
@@ -222,7 +222,7 @@ class MovementController:
                                else "Calibrated | press A here, then click PPSSPP")
         self.desired = desired if self.armed else set()
 
-    def on_hands(self, observations, timestamp, now):
+    def on_hands(self, observations, timestamp, now, diagnostics=None):
         if not self.armed or self.recovering:
             return
         if (self.keyboard.modifiers_down() or self.last_pose is None or now - self.last_pose > .3
@@ -245,6 +245,11 @@ class MovementController:
             self.last_attack = action
             self.last_attack_at = now
             self.attack_counts[action] += 1
+        if diagnostics and diagnostics.get("raw_hands", 0):
+            for state in self.strikes.hands.values():
+                if state.reason == "hand not detected":
+                    state.reason = ("palm outside frame" if diagnostics.get("palm_outside_frame")
+                                    else "hand visible: resolving left/right")
 
     def tick(self, now):
         if self.arm_at is not None:

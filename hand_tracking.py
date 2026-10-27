@@ -4,12 +4,14 @@ import math
 from pathlib import Path
 import threading
 import time
+from collections import Counter
 
 import cv2
 import mediapipe as mp
 
 from attacks import HandObservation
 from performance import TimingWindow
+from hand_identity import HandIdentity
 
 
 HAND_MODEL = Path(__file__).resolve().parent / "models" / "gesture_recognizer.task"
@@ -42,7 +44,9 @@ def finger_shape(points):
     return None
 
 
-def extract_hands(result, aspect):
+def extract_hands(result, aspect, diagnostics=None):
+    diagnostics = diagnostics if diagnostics is not None else Counter()
+    diagnostics["raw_hands"] += len(result.hand_landmarks)
     observations, outlines = [], []
     for index, points in enumerate(result.hand_landmarks):
         if len(points) != 21 or index >= len(result.handedness) or index >= len(result.gestures):
@@ -53,19 +57,25 @@ def extract_hands(result, aspect):
         gesture = max(result.gestures[index], key=lambda category: category.score)
         shape, score, source = gesture.category_name, gesture.score, "model"
         world = getattr(result, "hand_world_landmarks", [])
-        geometry = finger_shape(world[index]) if index < len(world) else None
+        fingers_in_frame = all(math.isfinite(p.x) and math.isfinite(p.y) and 0 <= p.x <= 1 and 0 <= p.y <= 1 for p in points)
+        geometry = finger_shape(world[index]) if index < len(world) and fingers_in_frame else None
         if geometry and (shape == "None" or (shape == geometry and score < .6)):
             shape, score, source = geometry, None, "geometry"
-        if handedness.category_name not in ("Left", "Right") or handedness.score < .7:
-            continue
-        if not all(math.isfinite(p.x) and math.isfinite(p.y) and 0 <= p.x <= 1 and 0 <= p.y <= 1 for p in points):
+        if handedness.category_name not in ("Left", "Right"):
+            diagnostics["identity_unresolved"] += 1
             continue
         palm = [points[i] for i in (0, 5, 9, 13, 17)]
+        if not all(math.isfinite(p.x) and math.isfinite(p.y) and 0 <= p.x <= 1 and 0 <= p.y <= 1 for p in palm):
+            diagnostics["palm_outside_frame"] += 1
+            continue
+        if handedness.score < .7:
+            diagnostics["uncertain_model_handedness"] += 1
         def distance(a, b):
             return math.hypot(points[a].x - points[b].x, (points[a].y - points[b].y) * aspect)
         observation = HandObservation(handedness.category_name, shape, score,
                                       sum(p.x for p in palm) / 5, sum(p.y for p in palm) / 5,
-                                      distance(5, 17), distance(0, 9), source)
+                                      distance(5, 17), distance(0, 9), source,
+                                      points[0].x, points[0].y, handedness.score)
         observations.append(observation)
         outlines.append((observation, tuple((p.x, p.y) for p in palm)))
     return observations, outlines
@@ -78,6 +88,9 @@ class HandTracker:
         self.closed = False
         self.latest = None
         self.pending_frame = None
+        self.pending_references = {}
+        self.identity = HandIdentity()
+        self.diagnostics = Counter()
         self.submitted_at = 0
         self.results = 0
         self.recognized_results = 0
@@ -98,19 +111,24 @@ class HandTracker:
         with self.lock:
             try:
                 frame = self.pending_frame
-                observations, outlines = extract_hands(result, frame.shape[0] / frame.shape[1])
+                diagnostics = Counter()
+                observations, outlines = extract_hands(result, frame.shape[0] / frame.shape[1], diagnostics)
+                observations = self.identity.assign(observations, self.pending_references, timestamp_ms / 1000)
+                outlines = [(hand, outline[1]) for hand, outline in zip(observations, outlines)]
+                diagnostics["assigned_hands"] = sum(hand.side != "Unknown" for hand in observations)
+                self.diagnostics.update(diagnostics)
                 elapsed = (time.monotonic() - self.submitted_at) * 1000
                 self.timing.add(elapsed)
                 self.results += 1
                 self.recognized_results += bool(observations)
-                self.latest = (timestamp_ms, observations, outlines, frame)
+                self.latest = (timestamp_ms, observations, outlines, frame, dict(diagnostics))
             except Exception as error:
                 self.error = str(error)
             finally:
                 self.pending_frame = None
                 self.busy = False
 
-    def submit(self, frame, timestamp_ms):
+    def submit(self, frame, timestamp_ms, references=None):
         with self.lock:
             if self.error:
                 raise RuntimeError(f"Hand tracker failed: {self.error}")
@@ -120,6 +138,7 @@ class HandTracker:
                 return False
             # Official hand example uses mirrored input for handedness labels.
             self.pending_frame = cv2.flip(frame, 1)
+            self.pending_references = references or {}
             self.busy = True
             self.submitted_at = time.monotonic()
             image = mp.Image(image_format=mp.ImageFormat.SRGB,
@@ -142,7 +161,7 @@ class HandTracker:
     def summary(self):
         with self.lock:
             return {"completed_results": self.results, "results_with_hands": self.recognized_results,
-                    "submit_to_result": self.timing.summary()}
+                    "submit_to_result": self.timing.summary(), "detection_counts": dict(self.diagnostics)}
 
     def close(self):
         if not self.closed:

@@ -22,6 +22,7 @@ echo The model score does not need to reach 100 percent. Check the displayed rea
 echo Use a forward open-palm push for the same-side kick button.
 echo Check that each movement increments only its matching counter once.
 echo H resets hand guards. A pauses/resumes practice. Q/Esc exits.
+echo Attack sensitivity defaults to 1.25x. Use [ or ] to adjust reach independently.
 ".venv\Scripts\python.exe" webcam_tracker.py --practice %*
 set "tracker_exit=%errorlevel%"
 if not "%tracker_exit%"=="0" pause
