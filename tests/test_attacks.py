@@ -93,6 +93,25 @@ class AttackTests(unittest.TestCase):
             self.assertEqual(self.feed(hand(1 + (.04 if index % 2 else -.04), score=.62)), set())
         self.assertEqual(self.engine.hands["Left"].phase, "ready")
 
+    def test_noisy_palm_size_can_ready_without_enabling_scale_attacks(self):
+        self.engine = HandAttacks(1.6)
+        for scale in (1, 1, 1, 1.35, 1.35):
+            self.assertEqual(self.feed(hand(scale, gesture="Open_Palm")), set())
+        state = self.engine.hands["Left"]
+        self.assertEqual(state.phase, "ready")
+        self.assertFalse(state.scale_reliable)
+        for index in range(100):
+            self.assertEqual(self.feed(hand(1.1 if index % 2 else 1.8, gesture="Open_Palm")), set())
+        events = []
+        for y in (.49, .47, .45, .43, .43, .43):
+            events.extend(self.feed(hand(gesture="Open_Palm", y=y)))
+        self.assertEqual(events, ["Cross"])
+
+    def test_consistent_guard_becomes_ready_in_five_observations(self):
+        for _ in range(5):
+            self.assertEqual(self.feed(hand(gesture="Open_Palm")), set())
+        self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
     def test_uncertain_shape_explains_why_guard_is_blocked(self):
         for _ in range(20):
             self.assertEqual(self.feed(hand(score=.55)), set())
@@ -138,6 +157,34 @@ class AttackTests(unittest.TestCase):
         for _ in range(20):
             self.assertEqual(self.feed(hand(1.7, gesture="Open_Palm")), set())
         self.assertEqual(self.engine.hands["Left"].phase, "ready")
+
+    def test_one_shape_misclassification_does_not_erase_a_ready_palm(self):
+        self.guard(gesture="Open_Palm")
+        anchor = self.engine.hands["Left"].anchor
+        self.assertEqual(self.feed(hand(gesture="Closed_Fist")), set())
+        self.assertEqual(self.feed(hand(gesture="Open_Palm")), set())
+        self.assertEqual(self.engine.hands["Left"].anchor, anchor)
+        self.assertEqual(self.engine.hands["Left"].gesture, "Open_Palm")
+
+    def test_high_sensitivity_held_near_threshold_does_not_repeat(self):
+        self.engine = HandAttacks(2)
+        self.guard()
+        events = []
+        for y in (.49, .48, .465, .454, .454, .454):
+            events.extend(self.feed(hand(y=y)))
+        self.assertEqual(events, ["Square"])
+        for _ in range(80):
+            self.assertEqual(self.feed(hand(y=.454)), set())
+
+    def test_return_can_rearm_after_a_short_confirmed_neutral_hold(self):
+        self.guard()
+        state = self.engine.hands["Left"]
+        state.phase = "return"
+        state.cooldown_until = self.now
+        self.feed(hand())
+        self.feed(hand())
+        self.feed(hand())
+        self.assertEqual(state.phase, "ready")
 
     def test_lowering_hand_does_not_count_as_kick(self):
         self.guard()

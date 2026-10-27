@@ -25,6 +25,7 @@ def finger_shape(points):
     if not all(math.isfinite(value) for point in xyz for value in point):
         return None
     folded = extended = 0
+    reaches = []
     for mcp, pip, tip in ((5, 6, 8), (9, 10, 12), (13, 14, 16), (17, 18, 20)):
         first = tuple(a - b for a, b in zip(xyz[mcp], xyz[pip]))
         second = tuple(a - b for a, b in zip(xyz[tip], xyz[pip]))
@@ -35,11 +36,12 @@ def finger_shape(points):
         cosine = max(-1, min(1, sum(a*b for a, b in zip(first, second)) / denominator))
         angle = math.degrees(math.acos(cosine))
         reach = math.dist(xyz[tip], xyz[0]) / palm_distance
+        reaches.append(reach)
         folded += angle < 115 and reach < 1.05
-        extended += angle > 150 and reach > 1.35
+        extended += angle > 135 and reach > 1.25
     if folded >= 3 and extended == 0:
         return "Closed_Fist"
-    if extended >= 3 and folded == 0:
+    if extended >= 2 and folded == 0 and min(reaches) > 1.1:
         return "Open_Palm"
     return None
 
@@ -100,9 +102,9 @@ class HandTracker:
             base_options=mp.tasks.BaseOptions(model_asset_path=str(model)),
             running_mode=mp.tasks.vision.RunningMode.LIVE_STREAM,
             num_hands=2,
-            min_hand_detection_confidence=.6,
-            min_hand_presence_confidence=.6,
-            min_tracking_confidence=.6,
+            min_hand_detection_confidence=.5,
+            min_hand_presence_confidence=.5,
+            min_tracking_confidence=.5,
             result_callback=self._result,
         )
         self.recognizer = mp.tasks.vision.GestureRecognizer.create_from_options(options)
@@ -161,7 +163,8 @@ class HandTracker:
     def summary(self):
         with self.lock:
             return {"completed_results": self.results, "results_with_hands": self.recognized_results,
-                    "submit_to_result": self.timing.summary(), "detection_counts": dict(self.diagnostics)}
+                    "submit_to_result": self.timing.summary(), "detection_counts": dict(self.diagnostics),
+                    "hand_model_thresholds": {"detection": .5, "presence": .5, "tracking": .5}}
 
     def close(self):
         if not self.closed:

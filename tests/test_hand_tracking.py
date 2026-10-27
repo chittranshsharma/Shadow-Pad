@@ -43,6 +43,18 @@ class HandTrackingTests(unittest.TestCase):
     def test_extended_palm_and_pointing_hand_are_distinguished(self):
         self.assertEqual(finger_shape(finger_points(range(4))), "Open_Palm")
         self.assertIsNone(finger_shape(finger_points((0,))))
+        self.assertIsNone(finger_shape(finger_points((0, 1))))
+
+    def test_naturally_curved_open_fingers_can_use_geometry_fallback(self):
+        points = finger_points(range(4))
+        for tip in (16, 20):
+            points[tip] = SimpleNamespace(x=points[tip].x, y=.065, z=-.02)
+        self.assertEqual(finger_shape(points), "Open_Palm")
+        detected = result("None", .91)
+        detected.hand_world_landmarks = [points]
+        hands, _ = extract_hands(detected, .75)
+        self.assertEqual(hands[0].gesture, "Open_Palm")
+        self.assertEqual(hands[0].source, "geometry")
 
     def test_none_label_can_use_definite_finger_curl_without_fake_score(self):
         detected = result("None", .95)

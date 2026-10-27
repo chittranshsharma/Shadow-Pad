@@ -244,6 +244,8 @@ class ControllerTests(unittest.TestCase):
             now += .05
         self.assertTrue(observed_attack)
         self.assertEqual(self.controller.attack_counts["Square"], 1)
+        self.assertEqual(self.controller.input_press_counts["Square"], 1)
+        self.assertEqual(self.controller.input_press_counts["Left"], 1)
         self.controller.on_hands([], now - .01, now)
         self.controller.tick(now + .005)
         self.assertNotIn(65, self.keyboard.keys)

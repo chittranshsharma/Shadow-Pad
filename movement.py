@@ -6,7 +6,7 @@ import math
 from statistics import median
 
 from tracking_quality import reliable
-from attacks import HandAttacks
+from attacks import ATTACK_PULSE_SECONDS, DEFAULT_ATTACK_SENSITIVITY, HandAttacks
 
 
 POSE_TIMEOUT = .6
@@ -112,7 +112,7 @@ class Movement:
 
 
 class MovementController:
-    def __init__(self, keyboard, bindings, sensitivity=1.0, attack_sensitivity=1.25):
+    def __init__(self, keyboard, bindings, sensitivity=1.0, attack_sensitivity=DEFAULT_ATTACK_SENSITIVITY):
         self.keyboard = keyboard
         self.practice = getattr(keyboard, "is_practice", False)
         self.bindings = bindings
@@ -125,6 +125,8 @@ class MovementController:
         self.strikes = HandAttacks(attack_sensitivity)
         self.pulses = {}
         self.attack_counts = {action: 0 for action in ("Square", "Triangle", "Cross", "Circle")}
+        self.input_press_counts = {action: 0 for action in bindings}
+        self.key_actions = {binding[0]: action for action, binding in bindings.items()}
         self.body = None
         self.body_history = deque(maxlen=16)
         self.last_hand_result = None
@@ -241,7 +243,7 @@ class MovementController:
                 for action in actions:
                     self.pulses.pop(action, None)
         for action in self.strikes.update(observations, timestamp, body):
-            self.pulses[action] = now + .12
+            self.pulses[action] = now + ATTACK_PULSE_SECONDS
             self.last_attack = action
             self.last_attack_at = now
             self.attack_counts[action] += 1
@@ -308,6 +310,7 @@ class MovementController:
             for key in desired_keys - self.held:
                 self.keyboard.press(key, self.target)
                 self.held.add(key)
+                self.input_press_counts[self.key_actions[key]] += 1
         except BaseException:
             self.pause("Input error: paused")
             raise

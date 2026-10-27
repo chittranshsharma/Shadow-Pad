@@ -149,12 +149,12 @@ Only supported keyboard bindings are used; gamepad bindings are ignored. Confirm
 
 1. Open **Test Gestures.cmd**. This mode cannot send desktop keyboard events.
 2. Press **C**, sit naturally with your head and shoulders visible, and hold still for about two seconds. Practice starts automatically when calibration completes; A pauses/resumes it.
-3. Hold one closed fist in a comfortable starting position, fully in view, with knuckles facing the camera until its state says **ready**. There is no chest-height gate or framing box. Learning a hand guard takes roughly half a second of stable observations.
+3. Hold one closed fist in a comfortable starting position, fully in view, with knuckles facing the camera until its state says **ready**. Use a relaxed chest-height stance. Readiness needs three filtered observations spanning at least 80 ms, after the three-result filter fills; actual waiting time depends on model throughput and tracking quality.
 4. Punch straight toward the camera, keeping the same hand orientation, then retract to the starting guard. The matching Square/Triangle counter should increase once.
 5. For a kick button, open that hand, hold the palm facing the camera until **ready**, push it straight forward, and retract. The matching Cross/Circle counter should increase once.
 6. Keep hands still for 20 seconds; counters should remain unchanged. Check ten deliberate attempts per action before using game control. Practice results are recognition events, not proof of Tekken response.
 
-The preview shows each hand's shape, its state and blocking reason, and **reach** progress toward the trigger (`0/1` near guard, `1/1` at the motion threshold). Reach is a geometric progress value, not a probability. Model scores are confidence, not measured recognition accuracy, and do not need to reach 100%. The canned model can return `None` for a rotated boxing fist; a definite folded-finger pattern from the hand landmarks can qualify it instead. That route is labeled **finger curl**, without a fabricated probability. Five consistent observations establish the guard. Left/right identity comes from fresh body wrist references, recent hand tracks, and separated body-side guard positions, rather than trusting each hand classifier label. **H** resets guards if needed; ordinary brief dropouts recover automatically. Green means ready to begin; amber during a strike/return is expected. The kick controls are hand proxies because the laptop view does not include your legs.
+The preview shows each hand's shape, its state and blocking reason, and **reach** progress toward the trigger (`0/1` near guard, `1/1` at the motion threshold). Reach is a geometric progress value, not a probability. Model scores are confidence, not measured recognition accuracy, and do not need to reach 100%. The canned model can return `None` for a rotated boxing fist; folded-finger geometry can qualify it instead. Naturally curved open fingers can also qualify as a palm. That route is labeled **finger curl**, without a fabricated probability. Left/right identity comes from fresh body wrist references, recent hand tracks, and separated body-side guard positions, rather than trusting each hand classifier label. **H** resets guards if needed; ordinary brief dropouts recover automatically. Green means ready to begin; amber during a strike/return is expected. The kick controls are hand proxies because the laptop view does not include your legs.
 
 ### 4. Play in PPSSPP
 
@@ -184,13 +184,13 @@ For smaller movements, increase sensitivity (allowed range 0.5–2):
 .\.venv\Scripts\python.exe webcam_tracker.py --control --sensitivity 1.5
 ```
 
-Movement sensitivity affects shoulders only. Attack reach has its own **1.25x default**, matching the latest local practice check. Use **]** to increase it or **[** to decrease it in 0.1 steps (range 0.5–2); changing it relearns hand guards. It changes required motion, not detection confidence, and cannot recover an unseen hand.
+Movement sensitivity affects shoulders only. Attack reach has its own **1.6x default**. Use **]** to increase it or **[** to decrease it in 0.1 steps (range 0.5–2); changing it relearns hand guards. It changes required motion, not detection confidence, and cannot recover an unseen hand. This faster setting still needs live kick and idle acceptance.
 
 ```powershell
-.\.venv\Scripts\python.exe webcam_tracker.py --practice --attack-sensitivity 1.25
+.\.venv\Scripts\python.exe webcam_tracker.py --practice --attack-sensitivity 1.6
 ```
 
-Attacks use a three-result median for palm dimensions and position. At 1x, a strike can qualify through 35% combined palm expansion, 0.22 shoulder widths upward, or 0.30 sideways, within an 800 ms motion window. Reach thresholds are divided by attack sensitivity. Progressive motion or repeated endpoint confirmation is required; lowering a hand does not qualify. One strike sends a 120 ms press and needs return plus cooldown before repeating. A nearby relaxed guard can be relearned after a dropout without requiring the exact old pixel position; extended strikes cannot rearm this way. This remains experimental geometry on pretrained hand tracking.
+Attacks use a three-result median for palm dimensions and position. At 1x, a strike can qualify through 35% combined palm expansion, 0.22 shoulder widths upward, or 0.30 sideways, within an 800 ms motion window. Reach thresholds are divided by attack sensitivity. If palm dimensions vary during guard learning, expansion is disabled for that guard; use a forward push that also travels slightly upward or sideways in the preview. Progressive motion or repeated endpoint confirmation is required; lowering a hand does not qualify. One strike requests an 80 ms press, a 180 ms cooldown, and a confirmed return before repeating. A nearby relaxed guard can be relearned after a dropout without requiring the exact old pixel position; extended strikes cannot rearm this way. This remains experimental geometry on pretrained hand tracking.
 
 ## Measure performance
 

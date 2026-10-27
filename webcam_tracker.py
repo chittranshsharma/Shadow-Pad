@@ -16,6 +16,7 @@ import numpy as np
 from tracking_quality import CONNECTIONS, JOINTS, STALE_SECONDS, assess, framing_hints, joint_reason, tracking_label
 from performance import PipelineMetrics, environment, write_report
 from movement import MovementController
+from attacks import DEFAULT_ATTACK_SENSITIVITY
 from hand_tracking import HAND_MODEL, HandTracker
 from hand_identity import body_references
 from ppsspp_input import CONTROL_ACTIONS, PracticeKeyboard, WindowsKeyboard, default_controls, read_bindings
@@ -263,7 +264,7 @@ def run(args):
             bindings = ({action: (index + 1, action) for index, action in enumerate(CONTROL_ACTIONS)}
                         if practice else read_bindings(args.controls, CONTROL_ACTIONS))
             controller = MovementController(PracticeKeyboard() if practice else WindowsKeyboard(),
-                                            bindings, args.sensitivity, getattr(args, "attack_sensitivity", 1.25))
+                                            bindings, args.sensitivity, getattr(args, "attack_sensitivity", DEFAULT_ATTACK_SENSITIVITY))
             hand_tracker = HandTracker(hand_model.resolve())
         tracker = Tracker(args.model.resolve(), args.confidence, args.warmup)
         camera = Camera(args.camera, args.backend)
@@ -332,6 +333,8 @@ def run(args):
             if practice and now - last_practice_report >= 2:
                 print(json.dumps({"practice_seconds": round(now - started, 1),
                                   "counts": controller.attack_counts,
+                                  "input_presses": controller.input_press_counts,
+                                  "active_actions": sorted(controller.key_actions[key] for key in controller.held),
                                   "detector": last_detection_summary,
                                   "hands": {side: {"phase": state.phase, "reason": state.reason}
                                             for side, state in controller.strikes.hands.items()}}), flush=True)
@@ -425,7 +428,8 @@ def run(args):
                                      "sha256": hashlib.sha256(hand_model.read_bytes()).hexdigest()}
             summary["practice"] = practice
             summary["recognized_attacks"] = controller.attack_counts
-            summary["attack_sensitivity"] = {"initial": getattr(args, "attack_sensitivity", 1.25),
+            summary["input_press_counts"] = controller.input_press_counts
+            summary["attack_sensitivity"] = {"initial": getattr(args, "attack_sensitivity", DEFAULT_ATTACK_SENSITIVITY),
                                               "final": controller.strikes.sensitivity}
             hand_tracker = None
         tracker = None
@@ -472,8 +476,8 @@ def arguments():
     mode.add_argument("--practice", action="store_true", help="Test gestures and counters without sending any desktop keys")
     parser.add_argument("--controls", type=Path, default=default_controls(), help="PPSSPP controls.ini path")
     parser.add_argument("--sensitivity", type=float, default=1.0, help="Movement sensitivity, 0.5-2 (higher needs less movement)")
-    parser.add_argument("--attack-sensitivity", type=float, default=1.25,
-                        help="Attack reach sensitivity, 0.5-2 (default: 1.25); independent of detection confidence")
+    parser.add_argument("--attack-sensitivity", type=float, default=DEFAULT_ATTACK_SENSITIVITY,
+                        help="Attack reach sensitivity, 0.5-2 (default: 1.6); independent of detection confidence")
     args = parser.parse_args()
     if args.camera < 0 or not np.isfinite(args.confidence) or not 0 <= args.confidence <= 1:
         parser.error("--camera must be nonnegative; --confidence must be between 0 and 1.")

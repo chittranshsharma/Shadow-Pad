@@ -36,6 +36,7 @@ Use `--practice --headless --seconds 60 --report reports/both-models-01.json` to
 - `quality_all_results`: presence and per-joint reliability counts, including warmup. A fast run with missing arms is not automatically better.
 - `hand_pipeline`: hand callback count, results with hand observations, and submission-to-result timings. These samples include hand warmup and finish after landmark extraction in the callback; do not combine them with the pose timing series.
 - `recognized_attacks`: motion events from the hand detector. Counts can be checked against labeled attempts, but do not prove native key delivery or visible game response.
+- `input_press_counts`: successful keyboard-adapter key-down transitions for all eight actions. In practice these are simulated; in control they still do not prove visible game response. Holds count once until released.
 - `hand_pipeline.detection_counts`: raw hand detections versus assigned identities and filter reasons. These distinguish hand acquisition from motion thresholds; assignment coverage is not gesture accuracy.
 - `attack_sensitivity`: initial/final reach settings. Record changes during an interactive evaluation; compare accuracy only under matched settings.
 
@@ -45,7 +46,7 @@ Compare median and tail latency alongside throughput and tracking coverage. P99 
 
 After gesture integration, label actual movement/strike attempts and measure precision, recall, false activations per minute, missed actions, and re-arm timing. Use the same evaluation protocol across configurations.
 
-For the current hand detector, first hold hands still for 20 seconds with practice running, then perform ten attempts for each action. Record the actual hand class shown, intended action, counter that changed, and whether an extra press occurred. Repeat across lighting and camera distances before presenting an accuracy claim.
+For the current hand detector, let calibration and hand readiness settle, then hold hands and torso still for 20 seconds with practice running. Compare `input_presses` for all eight actions before and after, and confirm `active_actions` starts empty. The two-second practice log retains brief press transitions that snapshots of held keys would miss. Then perform ten attempts for each action. Record the actual hand class shown, intended action, counter that changed, and whether an extra press occurred. Repeat across lighting and camera distances before presenting an accuracy claim.
 
 Motion-to-visible-game latency requires physical motion and screen response on a common timebase, such as a suitable high-frame-rate external recording with consent. A `SendInput` return timestamp cannot establish that latency. Distinguish recognition delay from game-animation timing.
 

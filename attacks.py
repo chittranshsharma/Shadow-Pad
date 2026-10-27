@@ -6,6 +6,10 @@ import math
 from statistics import median
 
 
+DEFAULT_ATTACK_SENSITIVITY = 1.6
+ATTACK_PULSE_SECONDS = .08
+
+
 @dataclass(frozen=True)
 class HandObservation:
     side: str
@@ -50,12 +54,16 @@ class HandState:
     ratio: float = 1.0
     progress: float = 0.0
     previous_progress: float = 0.0
+    ready_progress: float = 0.0
     confirmations: int = 0
     started: float = 0.0
     growth_steps: int = 0
     returned_at: float | None = None
     cooldown_until: float = 0.0
     reason: str = "show fist or palm"
+    pending_shape: str | None = None
+    pending_shape_count: int = 0
+    scale_reliable: bool = True
 
     def interrupt(self, keep_learning=False):
         # Reacquiring an extended hand must never become a fresh strike.
@@ -70,6 +78,8 @@ class HandState:
         self.growth_steps = 0
         self.confirmations = 0
         self.progress = self.previous_progress = 0
+        self.pending_shape = None
+        self.pending_shape_count = 0
         self.reason = "recovering hand" if self.anchor else "show fist or palm"
 
 
@@ -136,42 +146,52 @@ class HandAttacks:
             hand = grouped[side][0]
             if state.gesture != hand.gesture:
                 # Opening a fist increases its image size; learn a new guard first.
+                if state.gesture is not None:
+                    state.pending_shape_count = state.pending_shape_count + 1 if state.pending_shape == hand.gesture else 1
+                    state.pending_shape = hand.gesture
+                    state.reason = "confirming hand shape"
+                    if state.pending_shape_count < 2:
+                        continue
                 state = self.hands[side] = HandState(gesture=hand.gesture)
+            else:
+                state.pending_shape = None
+                state.pending_shape_count = 0
             if self._advance(state, hand, timestamp, body, self.sensitivity):
                 events.add(self.ACTIONS[(side, hand.gesture)])
         return events
 
     @staticmethod
-    def _learn_guard(state, hand, now, width, length, position, bw, duration=.3):
+    def _learn_guard(state, hand, now, width, length, position, bw, duration=.08):
         state.phase = "hold guard" if state.anchor is None else "reacquire"
         shape_supported = hand.source == "geometry" or hand.score >= .6
         state.samples.append((now, width, length, *position, bw, shape_supported))
         while state.samples and now - state.samples[0][0] > .8:
             state.samples.popleft()
-        state.reason = f"hold still: {min(len(state.samples), 5)}/5"
-        if len(state.samples) < 5 or now - state.samples[0][0] < duration:
+        state.reason = f"learning hand: {min(len(state.samples), 3)}/3"
+        if len(state.samples) < 3 or now - state.samples[0][0] < duration:
             return
         if sum(sample[6] for sample in state.samples) / len(state.samples) < .6:
             state.reason = "shape uncertain: turn fist/palm toward lens"
             return
+        scale_reliable = True
         for index in (1, 2):
             values = [sample[index] for sample in state.samples]
             centre = median(values)
             if median(abs(value - centre) for value in values) / centre > .08:
-                state.reason = "hold hand still"
-                return
+                scale_reliable = False
             half = len(values) // 2
             if abs(median(values[:half]) - median(values[-half:])) / centre > .1:
-                state.reason = "hold hand still"
-                return
-        if any(median(abs(s[i] - median(v[i] for v in state.samples)) for s in state.samples) > .08 for i in (3, 4)):
+                scale_reliable = False
+        if any(median(abs(s[i] - median(v[i] for v in state.samples)) for s in state.samples) > .12 for i in (3, 4)):
             state.reason = "hold hand still"
             return
         state.anchor = tuple(median(s[i] for s in state.samples) for i in range(1, 6))
+        state.scale_reliable = scale_reliable
         state.samples.clear()
         state.phase = state.reason = "ready"
         state.ratio = 1
         state.progress = state.previous_progress = 0
+        state.ready_progress = 0
         state.confirmations = state.growth_steps = 0
         state.returned_at = None
 
@@ -205,31 +225,41 @@ class HandAttacks:
         ratio = math.sqrt(rw * rl)
         state.ratio = ratio
         dx, dy = position[0] - ax, position[1] - ay
-        expansion = ((ratio - 1) / .35 if min(rw, rl) >= 1.08 and .75 <= rw / rl <= 1.33 and dy <= .18 else 0)
+        expansion = ((ratio - 1) / .35 if state.scale_reliable and min(rw, rl) >= 1.08
+                     and .75 <= rw / rl <= 1.33 and dy <= .18 else 0)
         travel = max(-dy / .22, abs(dx) / .30 if dy <= .12 else 0)
         progress = max(0, expansion, travel) * sensitivity
         previous = state.previous_progress
         state.progress = state.previous_progress = progress
-        near_guard = rw < 1.13 and rl < 1.13 and math.dist(position, (ax, ay)) < .12
+        size_retracted = not state.scale_reliable or (rw < 1.13 and rl < 1.13)
+        near_guard = (progress < .5 and size_retracted
+                      and math.dist(position, (ax, ay)) < .18)
         if state.phase in ("return", "reacquire"):
             state.reason = "retract hand"
+            if state.phase == "reacquire" and near_guard and now >= state.cooldown_until:
+                HandAttacks._learn_guard(state, hand, now, width, length, position, bw, duration=.12)
+                return False
             if near_guard and now >= state.cooldown_until:
                 if state.returned_at is None:
                     state.returned_at = now
-                elif now - state.returned_at >= .18:
+                elif now - state.returned_at >= .08:
                     state.phase = "ready"
                     state.reason = "ready"
-                    state.anchor = (width, length, *position, bw)
+                    if progress < .2:
+                        state.anchor = (width, length, *position, bw)
+                        state.ready_progress = 0
+                    else:
+                        state.ready_progress = progress
                     state.returned_at = None
                     state.growth_steps = 0
                     state.confirmations = 0
                     state.samples.clear()
             else:
                 state.returned_at = None
-                if progress < .7 and rw < 1.15 and rl < 1.15 and now >= state.cooldown_until:
-                    HandAttacks._learn_guard(state, hand, now, width, length, position, bw, duration=.5)
+                if progress < .7 and (not state.scale_reliable or (rw < 1.15 and rl < 1.15)) and now >= state.cooldown_until:
+                    HandAttacks._learn_guard(state, hand, now, width, length, position, bw, duration=.12)
             return False
-        if state.phase == "ready" and progress > .3:
+        if state.phase == "ready" and progress > .3 and progress - state.ready_progress > .12:
             state.phase = "extending"
             state.reason = "push forward"
             state.started = now
@@ -243,6 +273,7 @@ class HandAttacks:
             if progress < .18:
                 state.phase = "ready"
                 state.reason = "ready"
+                state.ready_progress = progress
                 state.growth_steps = 0
             elif now - state.started > .8 or ratio > 2.4:
                 state.phase = "return"
@@ -250,7 +281,7 @@ class HandAttacks:
             elif progress >= 1 and (state.growth_steps >= 2 or state.confirmations >= 2):
                 state.phase = "return"
                 state.reason = "attack detected: retract"
-                state.cooldown_until = now + .3
+                state.cooldown_until = now + .18
                 state.returned_at = None
                 return True
         return False
